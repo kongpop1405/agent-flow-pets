@@ -117,6 +117,12 @@ function petOf(node: FlowNode): string {
   if (node.type === 'shell') return '🐢'
   return SPECIES.find(([re]) => node.model !== undefined && re.test(node.model))?.[1] ?? '🐰'
 }
+const LEGEND = [
+  '🐱 main loop       🐢 background shell',
+  '🐹 haiku   🐶 sonnet   🦊 opus   🐉 fable',
+  '🐰 subagent, model not known',
+  '💨 working         💤 finished',
+]
 // Stopped, failed or finished: all asleep. The status colour and the detail still tell them apart.
 const RESTING: Record<Status, string> = { running: '', done: '💤', failed: '💤', aborted: '💤' }
 
@@ -627,8 +633,10 @@ export const register: Register = (on, options) => {
     }
 
     const big = bigPet(width)
+    // Docked, the pane is taller than the tree: fill it so the legend sits on the last rows.
+    const fill = e.props.placement === 'dock' ? e.props.scroll.bodyRows : undefined
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" minHeight={fill}>
         {header}
         <Box key="ag-head" marginTop={1}>
           <Text bold color="cyan">
@@ -646,6 +654,22 @@ export const register: Register = (on, options) => {
             </Text>
           ))}
           <Text dimColor>{fit(big.caption, width)}</Text>
+        </Box>
+        <Box key="spacer" flexGrow={1} />
+        <Box key="legend" marginTop={1} flexDirection="column">
+          <Text bold color="cyan">{fit('Pets', width)}</Text>
+          {LEGEND.map((l, i) => (
+            <Text key={`lg:${i}`} dimColor>
+              {fit(l, width)}
+            </Text>
+          ))}
+          <Text>
+            <Text dimColor>{'colour: '}</Text>
+            <Text color={STATUS_COLOR.running}>{'running '}</Text>
+            <Text color={STATUS_COLOR.done}>{'done '}</Text>
+            <Text color={STATUS_COLOR.failed}>{'failed '}</Text>
+            <Text color={STATUS_COLOR.aborted}>{'stopped'}</Text>
+          </Text>
         </Box>
       </Box>
     )

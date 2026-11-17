@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="472" height="514" viewBox="0 0 472 514">
+<rect width="472" height="514" rx="10" fill="#0d1117"/>
+<rect width="472" height="30" rx="10" fill="#161b22"/><rect y="20" width="472" height="10" fill="#161b22"/>
+<circle cx="18" cy="15" r="5" fill="#f47067"/><circle cx="34" cy="15" r="5" fill="#e3b341"/><circle cx="50" cy="15" r="5" fill="#56d364"/>
+<text x="236.0" y="20" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e">agents · all done</text>
+<g font-family="Cascadia Mono, Consolas, Menlo, monospace" font-size="15" xml:space="preserve" style="white-space:pre">
+<text x="20" y="65"><tspan fill="#56d4dd" font-weight="bold">Agents (0 running · 4 done · 1 failed)</tspan></text>
+<text x="20" y="87"><tspan fill="#56d364">🐱💤  </tspan><tspan fill="#7d8590">main</tspan><tspan fill="#d2a8ff">                          91k 35⚒</tspan></text>
+<text x="20" y="109"><tspan fill="#7d8590">├─</tspan><tspan fill="#56d364">🦊💤  </tspan><tspan fill="#7d8590">Plan  design token refresh</tspan><tspan fill="#d2a8ff">     24k 9⚒</tspan></text>
+<text x="20" y="131"><tspan fill="#7d8590">│ └─</tspan><tspan fill="#56d364">🐹💤  </tspan><tspan fill="#7d8590">Explore  find callers</tspan><tspan fill="#d2a8ff">        6k 4⚒</tspan></text>
+<text x="20" y="153"><tspan fill="#7d8590">├─</tspan><tspan fill="#f47067">🐶💤  </tspan><tspan fill="#7d8590">general-purpose  write tests</tspan><tspan fill="#d2a8ff">  18k 9⚒</tspan></text>
+<text x="20" y="175"><tspan fill="#7d8590">└─</tspan><tspan fill="#8b949e">🐢💤  </tspan><tspan fill="#7d8590">shell  run test suite</tspan></text>
+<text x="20" y="197"><tspan fill="#d4d4d4"></tspan></text>
+<text x="20" y="219"><tspan fill="#56d4dd">                 Z    Z</tspan></text>
+<text x="20" y="241"><tspan fill="#56d4dd">               /\_/\ </tspan></text>
+<text x="20" y="263"><tspan fill="#56d4dd">              ( -.- )</tspan></text>
+<text x="20" y="285"><tspan fill="#56d4dd">               &gt; ^ &lt; </tspan></text>
+<text x="20" y="307"><tspan fill="#56d4dd">              (_____)~</tspan></text>
+<text x="20" y="329"><tspan fill="#7d8590">            asleep · nothing running</tspan></text>
+<text x="20" y="351"><tspan fill="#d4d4d4"></tspan></text>
+<text x="20" y="373"><tspan fill="#56d4dd" font-weight="bold">Pets</tspan></text>
+<text x="20" y="395"><tspan fill="#7d8590">🐱 main loop       🐢 background shell</tspan></text>
+<text x="20" y="417"><tspan fill="#7d8590">🐹 haiku   🐶 sonnet   🦊 opus   🐉 fable</tspan></text>
+<text x="20" y="439"><tspan fill="#7d8590">🐰 subagent, model not known</tspan></text>
+<text x="20" y="461"><tspan fill="#7d8590">💨 working         💤 finished</tspan></text>
+<text x="20" y="483"><tspan fill="#7d8590">colour: </tspan><tspan fill="#e3b341">running </tspan><tspan fill="#56d364">done </tspan><tspan fill="#f47067">failed </tspan><tspan fill="#8b949e">stopped</tspan></text>
+</g></svg>
