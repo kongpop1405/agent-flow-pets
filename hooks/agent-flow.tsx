@@ -22,6 +22,7 @@
  *   maxAgents: number    subagents kept, oldest finished dropped first (default 60)
  *   openOnStart: boolean open the pane when the session starts (default false)
  *   openOnAgent: boolean open the pane (without focus) when an Agent call spawns a subagent (default true)
+ *   openOnBackground: boolean open the pane (without focus) when a shell command goes to the background (default true)
  */
 import { atom, read, update } from 'claude-code'
 import type { ContextCategory, EngineInterface, Register, SessionContextUsage, SessionCost, Timer } from 'claude-code'
@@ -38,7 +39,9 @@ import {
   fit,
   fmtDuration,
   fmtTokens,
+  laneSynced,
   mainTurn,
+  parseLane,
   maxAgents,
   paneColumns,
   rows,
@@ -115,10 +118,13 @@ function shellEnded(taskId: string, status: string, now: number): boolean {
 function petOf(node: FlowNode): string {
   if (node.id === MAIN) return '🐱'
   if (node.type === 'shell') return '🐢'
+  if (node.type === 'qwen') return '🐼'
+  if (node.type === 'gate-run') return '🦉'
   return SPECIES.find(([re]) => node.model !== undefined && re.test(node.model))?.[1] ?? '🐰'
 }
 const LEGEND = [
   '🐱 main loop       🐢 background shell',
+  '🐼 qwen (lane-home) 🦉 gate-runner',
   '🐹 haiku   🐶 sonnet   🦊 opus   🐉 fable',
   '🐰 subagent, model not known',
   '💨 working         💤 finished',
@@ -130,6 +136,39 @@ const RESTING: Record<Status, string> = { running: '', done: '💤', failed: '�
 // kept there and read back when the session start it was saved under is still the current one.
 const savedAtom = atom({ plugin: 'agent-flow', key: 'saved' } as const, null as SavedFlow)
 let sessionStartedAt: number | undefined
+
+// The dispatcher's qwen runs live outside this session: no hook sees them, so poll their pid files.
+const LANE_POLL_MS = 20_000
+// Git Bash is not on the Windows PATH; `bash` covers every other host.
+const BASH = ['C:/Program Files/Git/bin/bash.exe', 'bash']
+let laneTimer: Timer | undefined
+let lanePolling = false
+
+async function pollLane($: EngineInterface): Promise<{ changed: boolean; added: boolean }> {
+  const none = { changed: false, added: false }
+  if (lanePolling) return none
+  lanePolling = true
+  try {
+    for (const bash of BASH) {
+      const r = await $.process.run([bash, `${$.plugin.root}/hooks/lane-home.sh`], { timeoutMs: 10_000 }).catch(() => undefined)
+      if (!r) continue
+      return laneSynced(flow, parseLane(r.stdout), Date.now())
+    }
+    return none
+  } finally {
+    lanePolling = false
+  }
+}
+
+// No focus: spawns happen mid-turn and the person may be typing the next prompt.
+async function openQuietly($: EngineInterface, columns: number) {
+  if (isOpen) return
+  isOpen = true
+  await $.ui.open({ id: PANE, title: 'agents', columns }).catch(err => {
+    isOpen = false
+    $.ui.log(`agent-flow: pane not opened: ${err}`, { to: 'debug' })
+  })
+}
 
 async function saveFlow($: EngineInterface) {
   if (sessionStartedAt === undefined) return
@@ -242,6 +281,7 @@ export const register: Register = (on, options) => {
   const keep = maxAgents(options.maxAgents)
   const openOnStart = options.openOnStart === true
   const openOnAgent = options.openOnAgent !== false
+  const openOnBackground = options.openOnBackground !== false
 
   on('session.start', async ($, e, next) => {
     const r = await next(e)
@@ -262,6 +302,20 @@ export const register: Register = (on, options) => {
       petFrame += 1
       $.ui.invalidate('ui.render')
     })
+    const lane = async () => {
+      const r = await pollLane($)
+      if (!r.changed) return
+      trimmed(flow, keep)
+      await saveFlow($)
+      if (r.added && openOnBackground) await openQuietly($, columns)
+      if (isOpen) {
+        $.ui.status(statusText())
+        $.ui.invalidate('ui.render')
+      }
+    }
+    laneTimer?.cancel()
+    laneTimer = $.clock.every(LANE_POLL_MS, lane)
+    void lane()
     await $.command
       .register({
         name: COMMAND,
@@ -351,14 +405,7 @@ export const register: Register = (on, options) => {
       )
       trimmed(flow, keep)
       await saveFlow($)
-      // no focus: the spawn happens mid-turn and the person may be typing the next prompt
-      if (!isOpen && openOnAgent) {
-        isOpen = true
-        await $.ui.open({ id: PANE, title: 'agents', columns }).catch(err => {
-          isOpen = false
-          $.ui.log(`agent-flow: pane not opened: ${err}`, { to: 'debug' })
-        })
-      }
+      if (openOnAgent) await openQuietly($, columns)
       if (isOpen) {
         $.ui.status(statusText())
         $.ui.invalidate('ui.render')
@@ -396,7 +443,8 @@ export const register: Register = (on, options) => {
     // A shell sent to the background (asked for, or moved there by its timeout) joins the flow as a pet.
     const fields = e as unknown as Record<string, unknown>
     const bgId = (r.result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
-    if (e.tool === 'Bash' && typeof bgId === 'string') {
+    // Windows sessions run background commands through the PowerShell tool, not Bash.
+    if ((e.tool === 'Bash' || e.tool === 'PowerShell') && typeof bgId === 'string') {
       const command = typeof fields.command === 'string' ? fields.command : ''
       const description = typeof fields.description === 'string' && fields.description ? fields.description : command
       spawned(
@@ -406,6 +454,10 @@ export const register: Register = (on, options) => {
       )
       trimmed(flow, keep)
       await saveFlow($)
+      if (openOnBackground) {
+        await openQuietly($, columns)
+        $.ui.status(statusText())
+      }
     } else if (e.tool === 'TaskStop' && r.deny === undefined) {
       const id = typeof fields.task_id === 'string' ? fields.task_id : typeof fields.shell_id === 'string' ? fields.shell_id : ''
       if (shellEnded(id, 'killed', Date.now())) await saveFlow($)
@@ -486,6 +538,7 @@ export const register: Register = (on, options) => {
       if (selected && !flow.nodes.has(selected)) selected = undefined
     } else if (key === 'refresh') {
       synced(flow, await $.agent.list().catch(() => []))
+      await pollLane($)
     } else if (key.startsWith(KEY)) {
       const id = key.slice(KEY.length)
       selected = selected === id ? undefined : id

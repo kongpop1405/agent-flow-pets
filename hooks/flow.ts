@@ -235,6 +235,76 @@ export function synced(flow: Flow, list: readonly { id: string; status: string; 
   }
 }
 
+// Runs outside this session (the lane-home dispatcher's qwen sessions, the gate-runner) as
+// `hooks/lane-home.sh` reports them; they share the node map, the prefix keeps ids apart.
+export type LaneRun = { id: string; type: 'qwen' | 'gate-run'; kind: string; startedAt: number; title: string }
+export type LaneReport = { alive: LaneRun[]; exits: Map<string, number> }
+
+// One node per try: a retry under the old id would overwrite the failed try the user wants to look back at.
+export const laneId = (issue: string, attempt: string) => `lane:${issue}:${attempt}`
+const LANE_SETTLE_MS = 90_000
+
+export function parseLane(text: string): LaneReport {
+  const alive: LaneRun[] = []
+  const exits = new Map<string, number>()
+  for (const line of text.split('\n')) {
+    const [tag, a = '', b = '', c = '', d = '', ...rest] = line.replace(/\r$/, '').split('\t')
+    if (tag === 'A' && /^\d+$/.test(a) && /^\d+$/.test(d)) {
+      const nth = d === '1' ? '' : ` ครั้งที่ ${d}`
+      alive.push({ id: laneId(a, d), type: 'qwen', kind: b, startedAt: Number(c) * 1000 || 0, title: `#${a}${nth} ${rest.join(' ')}`.trim() })
+    } else if (tag === 'E' && /^\d+$/.test(a) && /^\d+$/.test(b) && /^\d+$/.test(c)) {
+      exits.set(laneId(a, b), Number(c))
+    } else if (tag === 'G' && /^\d+$/.test(a)) {
+      alive.push({ id: 'lane:gate-runner', type: 'gate-run', kind: 'gate-run', startedAt: Number(b) * 1000 || 0, title: [c, ...rest].join(' ').trim() || 'gate-runner' })
+    }
+  }
+  return { alive, exits }
+}
+
+/** Folds a lane report in: new runs join under main, runs whose pid is gone end. Returns whether anything changed and whether a run is new. */
+export function laneSynced(flow: Flow, report: LaneReport, now: number): { changed: boolean; added: boolean } {
+  let changed = false
+  let added = false
+  const seen = new Set<string>()
+  for (const run of report.alive) {
+    seen.add(run.id)
+    const known = flow.nodes.get(run.id)
+    if (known && known.status === 'running') continue
+    const node = spawned(
+      flow,
+      { agentId: run.id, description: run.title, subagentType: run.type, prompt: `${run.type} · ${run.kind}`, fork: false, background: true, model: run.type === 'qwen' ? 'qwen' : undefined },
+      now,
+    )
+    node.status = 'running'
+    node.startedAt = run.startedAt || now
+    node.durationMs = undefined
+    changed = true
+    added = true
+  }
+  for (const node of flow.nodes.values()) {
+    if (!node.id.startsWith('lane:') || seen.has(node.id)) continue
+    const exit = report.exits.get(node.id)
+    // The pid file can go a poll before the dispatcher logs its end line, and an older run's
+    // end line may be what we read then: settle a just-ended run again once the newer line lands.
+    const justEnded = node.status !== 'running' && node.durationMs !== undefined && now - (node.startedAt + node.durationMs) < LANE_SETTLE_MS
+    if (justEnded) {
+      const settled = exit === undefined || exit === 0 ? 'done' : 'failed'
+      if (exit !== undefined && (settled !== node.status || node.answer !== `exit ${exit}`)) {
+        node.status = settled
+        node.answer = `exit ${exit}`
+        changed = true
+      }
+      continue
+    }
+    if (node.status !== 'running') continue
+    node.status = exit === undefined || exit === 0 ? 'done' : 'failed'
+    node.durationMs = now - node.startedAt
+    if (exit !== undefined) node.answer = `exit ${exit}`
+    changed = true
+  }
+  return { changed, added }
+}
+
 /** Drops the oldest finished subagents past `max`, and their subtrees with them. */
 export function trimmed(flow: Flow, max: number): void {
   const subs = flow.order.filter(id => id !== MAIN)
