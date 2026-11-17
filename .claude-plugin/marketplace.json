@@ -1,5 +1,6 @@
 {
   "name": "agent-flow-pets",
+  "description": "agent-flow mod for Claude Code: live agent tree pane with pets",
   "owner": { "name": "kongpop1405" },
   "plugins": [{ "name": "agent-flow", "source": "./" }]
 }
