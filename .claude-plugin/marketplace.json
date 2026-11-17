@@ -1,0 +1,5 @@
+{
+  "name": "agent-flow-pets",
+  "owner": { "name": "kongpop1405" },
+  "plugins": [{ "name": "agent-flow", "source": "./" }]
+}
