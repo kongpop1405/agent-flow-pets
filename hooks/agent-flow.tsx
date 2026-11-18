@@ -117,8 +117,10 @@ function resetWatch() {
 // Dirs come from paths the session read or commands it ran, so a repo can be a stranger's: its
 // .git/config must not pick a program for git to run, and a UNC path would reach out to a host.
 const SAFE_GIT = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', '-c', 'core.sshCommand=', '-c', 'protocol.allow=never']
-// two leading separators in any mix (`\\host`, `//host`, `/\host`, `\\?\UNC\`) name another machine
-const remotePath = (dir: string) => /^[\\/]{2}/.test(dir.trim())
+// Allow only a plain drive path (`C:\`, `C:/`) or a POSIX one (`/x`, Git Bash `/c/x`): every other
+// spelling (`\\host`, `/\host`, `\\?\UNC\`, `\??\`, `\\.\`) can name another machine or a device.
+const localPath = (dir: string) => /^[A-Za-z]:[\\/](?![\\/])/.test(dir) || /^\/(?![\\/])/.test(dir)
+const remotePath = (dir: string) => !localPath(dir) || /[\\/](\?\??|\.)[\\/]/.test(dir)
 
 /** A repo's whole path, home shown as `~`: two worktrees or junctions can share a last folder name. */
 function repoPath(top: string): string {
