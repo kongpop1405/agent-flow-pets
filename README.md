@@ -114,6 +114,7 @@ The free rows between the Git section and the buttons hold one animal per runnin
 - **Editor and desktop:** flat coloured SVG, animated by the surface itself.
 - **Terminal:** no SVG there, so plain-ASCII art in two sizes (7 rows, then 4), hidden when fewer than 4 rows are free.
 - **Off by default:** press `show mascot` beside `▸ Pets` to draw it; `hide mascot` clears it again (the rows stay blank). The choice holds across reloads within the session. In VS Code the picture sometimes shows only its caption (`nothing running`) right after the pane opens; `hide mascot` then `show mascot` redraws it.
+- **Frozen mascot:** when one animation frame takes over 100 ms to draw (including time spent waiting on a busy machine), VS Code freezes every animation of the mod for 5 minutes, and freezes it again on the next slow frame, so it can look stuck for good. Run `Developer: Reload Window` to clear it. To see why, open `Developer: Open Webview Developer Tools`, set the console context to the `about:srcdoc` iframe, paste [`tools/calm-probe.js`](tools/calm-probe.js), use Claude as usual until the pet stops, then run `calmReport()`: a high `ownMs` means the picture is too heavy to draw, a high `lag` with low `ownMs` means the machine was busy.
 
 ### 7. Workflow and Actions
 
