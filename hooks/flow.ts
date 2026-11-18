@@ -43,6 +43,8 @@ export type FlowNode = {
   tools: ToolUse[]
   startedAt: number
   durationMs?: number
+  /** a Monitor's deadline (epoch ms): it ends then if nothing reports its end first */
+  endsAt?: number
   /** a teammate between turns: drawn as done, but kept by trimming until it ends */
   idle?: boolean
   /** the main-loop turn it was spawned in (1-based) */

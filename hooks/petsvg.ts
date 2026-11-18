@@ -27,6 +27,13 @@ const LOOKS: Record<Kind, Look> = {
     ears: `<path d="M48 23 q0 -10 6 -9 q-4 3 -3 9 z" fill="#f5b700"/>`,
     face: `<path d="M45 55 L55 55 L50 62 Z" fill="#ff8c1a"/>`,
   },
+  penguin: {
+    fur: '#34405a',
+    belly: '#ffffff',
+    ears: '',
+    face: `<ellipse cx="41" cy="52" rx="10" ry="12" fill="#ffffff"/><ellipse cx="59" cy="52" rx="10" ry="12" fill="#ffffff"/>
+<ellipse cx="50" cy="60" rx="15" ry="9" fill="#ffffff"/><path d="M45 55 L55 55 L50 61 Z" fill="#ff9f1c"/>`,
+  },
   koala: {
     fur: '#a3a9b6',
     belly: '#e6e8ee',
@@ -96,18 +103,18 @@ export function petSvg(m: Mascot, i = 0): string {
         )
         .join('')
   const mouth =
-    m.kind === 'chick' || m.kind === 'owl' || m.kind === 'dog'
+    m.kind === 'chick' || m.kind === 'penguin' || m.kind === 'owl' || m.kind === 'dog'
       ? ''
       : `<path d="M46 59 q2 2.4 4 0 q2 2.4 4 0" stroke="${INK}" stroke-width="1.3" fill="none" stroke-linecap="round"/>`
   const cheeks = `<ellipse cx="33" cy="58" rx="4.5" ry="3" fill="${CHEEK}" opacity=".45"/><ellipse cx="67" cy="58" rx="4.5" ry="3" fill="${CHEEK}" opacity=".45"/>`
   const feet =
-    m.kind === 'chick' || m.kind === 'owl'
+    m.kind === 'chick' || m.kind === 'penguin' || m.kind === 'owl'
       ? `<path d="M41 96 l-3 3 M41 96 l0 3.5 M59 96 l3 3 M59 96 l0 3.5" stroke="#ff8c1a" stroke-width="1.8" stroke-linecap="round"/>`
       : `<ellipse cx="40" cy="96" rx="7" ry="3.5" fill="${look.fur}" ${EDGE}/><ellipse cx="60" cy="96" rx="7" ry="3.5" fill="${look.fur}" ${EDGE}/>`
   const arms =
     m.kind === 'panda'
       ? `<ellipse cx="29" cy="80" rx="6" ry="10" fill="#2b2b2b"/><ellipse cx="71" cy="80" rx="6" ry="10" fill="#2b2b2b"/>`
-      : m.kind === 'chick' || m.kind === 'owl'
+      : m.kind === 'chick' || m.kind === 'penguin' || m.kind === 'owl'
         ? `<ellipse cx="27" cy="80" rx="5" ry="10" fill="${look.fur}" ${EDGE} transform="rotate(15 27 80)"/><ellipse cx="73" cy="80" rx="5" ry="10" fill="${look.fur}" ${EDGE} transform="rotate(-15 73 80)"/>`
         : ''
   const pet = `${look.ears}

@@ -74,6 +74,7 @@ Agents 1 running · 5 done · 1 failed
 - Each row: status mark, pet, agent type and description, its current context size and how many tools it called (`⚒`).
 - Children sit under the agent that spawned them. Among siblings, running ones come first, then failed, stopped and done (newest done first). A finished parent whose child is still running or failed sorts with that child.
 - Background shells (`run_in_background`, Bash or PowerShell) join the tree as 🐥. Past three finished shells under one parent, the older ones fold into `N more shells done`. Press it to show them all. Finished agents are never folded.
+- Monitors (the `Monitor` tool watching a command or a socket) join the tree as 🐧 while they run. One ends when its task reports an end, when it is stopped with `TaskStop`, or when its timeout passes. A persistent monitor runs until stopped.
 
 | Mark | Status |
 | --- | --- |
@@ -135,6 +136,7 @@ Folded by default; press `▸ Pets` to open the legend:
 | --- | --- |
 | 🐱 | main loop (your conversation) |
 | 🐥 | background shell command |
+| 🐧 | monitor |
 | 🐨 | qwen |
 | 🦉 | gate-runner |
 | 🐹 | subagent on **Haiku** |

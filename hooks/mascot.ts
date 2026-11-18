@@ -2,7 +2,7 @@
 // so every row is exactly as wide as it looks (emoji widths differ between fonts).
 // Pure data and layout, no engine calls, so node can test it directly.
 
-export type Kind = 'cat' | 'chick' | 'koala' | 'owl' | 'hamster' | 'dog' | 'panda' | 'unicorn' | 'rabbit'
+export type Kind = 'cat' | 'chick' | 'penguin' | 'koala' | 'owl' | 'hamster' | 'dog' | 'panda' | 'unicorn' | 'rabbit'
 export type Size = 'S' | 'L'
 export type Mascot = { kind: Kind; asleep?: boolean }
 
@@ -27,6 +27,10 @@ const ART: Record<Kind, Record<Size, string[]>> = {
   chick: {
     S: ['   __', ' <(o )_', '  ( ._>', "   '-'"],
     L: ['     ,', "   .-'-.", '  ( o o )', '  (  v  )', ' /(     )\\', "   '---'", '    ^ ^'],
+  },
+  penguin: {
+    S: ['  .-.', ' (o o)', '/( v )\\', '  ^ ^'],
+    L: ['    .---.', '   / o o \\', '   \\  v  /', "  /'-----'\\", ' / |     | \\', '   \\_____/', '    ^   ^'],
   },
   koala: {
     S: ['@(   )@', ' (o o)', ' ( Y )', "  '''"],

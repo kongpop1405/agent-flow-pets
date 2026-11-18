@@ -275,8 +275,21 @@ function adopted(list: readonly Listed[], now: number): boolean {
   return added
 }
 
-// Background shells live in the same map as agents; the prefix keeps their ids apart.
+// Background shells and monitors live in the same map as agents; the prefix keeps their ids apart.
+// Both are tasks, so one task id ends either: a task-notification or a TaskStop.
 const shellId = (taskId: string) => `bg:${taskId}`
+
+// A monitor that times out may say nothing more: past its deadline it counts as done.
+function monitorsExpired(now: number): boolean {
+  let changed = false
+  for (const node of flow.nodes.values()) {
+    if (node.status !== 'running' || node.endsAt === undefined || node.endsAt > now) continue
+    node.status = 'done'
+    node.durationMs = node.endsAt - node.startedAt
+    changed = true
+  }
+  return changed
+}
 
 function shellEnded(taskId: string, status: string, now: number): boolean {
   const node = flow.nodes.get(shellId(taskId))
@@ -289,6 +302,7 @@ function shellEnded(taskId: string, status: string, now: number): boolean {
 function petOf(node: FlowNode): string {
   if (node.id === MAIN) return '🐱'
   if (node.type === 'shell') return '🐥'
+  if (node.type === 'monitor') return '🐧'
   if (node.type === 'qwen') return '🐨'
   if (node.type === 'gate-run') return '🦉'
   return SPECIES.find(([re]) => node.model !== undefined && re.test(node.model))?.[1] ?? '🐰'
@@ -296,6 +310,7 @@ function petOf(node: FlowNode): string {
 const LEGEND = [
   '🐱 main loop',
   '🐥 background shell',
+  '🐧 monitor',
   '🐨 qwen',
   '🦉 gate-runner',
   '🐹 haiku',
@@ -404,6 +419,7 @@ function restored(text: SavedFlow, startedAt: number): Flow | undefined {
 const KIND_OF: Record<string, Kind> = {
   '🐱': 'cat',
   '🐥': 'chick',
+  '🐧': 'penguin',
   '🐨': 'koala',
   '🦉': 'owl',
   '🐹': 'hamster',
@@ -513,8 +529,9 @@ export const register: Register = (on, options) => {
       $.ui.invalidate('ui.render')
     })
     const lane = async () => {
+      const expired = monitorsExpired(Date.now())
       const r = await pollLane($)
-      if (!r.changed) return
+      if (!r.changed && !expired) return
       trimmed(flow, keep)
       await saveFlow($)
       if (r.added && openOnBackground) await openQuietly($, columns)
@@ -677,16 +694,34 @@ export const register: Register = (on, options) => {
     // after the result, never awaited: git spawns must not hold the tool's answer back
     if (!failed) void noteRepos($, e.tool, fields)
     // A shell sent to the background (asked for, or moved there by its timeout) joins the flow as a pet.
-    const bgId = (r.result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
+    const out = r.result as { backgroundTaskId?: unknown; taskId?: unknown; timeoutMs?: unknown; persistent?: unknown } | undefined
     // Windows sessions run background commands through the PowerShell tool, not Bash.
-    if ((e.tool === 'Bash' || e.tool === 'PowerShell') && typeof bgId === 'string') {
-      const command = typeof fields.command === 'string' ? fields.command : ''
+    const shell = (e.tool === 'Bash' || e.tool === 'PowerShell') && typeof out?.backgroundTaskId === 'string'
+    // A Monitor keeps running after its call returns, watching a command or a socket.
+    const monitor = e.tool === 'Monitor' && !failed && typeof out?.taskId === 'string'
+    if (shell || monitor) {
+      const ws = fields.ws as { url?: unknown } | undefined
+      const command =
+        typeof fields.command === 'string' ? fields.command : typeof ws?.url === 'string' ? `ws ${ws.url}` : ''
       const description = typeof fields.description === 'string' && fields.description ? fields.description : command
-      spawned(
+      const now = Date.now()
+      const node = spawned(
         flow,
-        { agentId: shellId(bgId), parentAgentId: e.agentId, description, subagentType: 'shell', prompt: command, fork: false, background: true },
-        Date.now(),
+        {
+          agentId: shellId(String(shell ? out?.backgroundTaskId : out?.taskId)),
+          parentAgentId: e.agentId,
+          description,
+          subagentType: shell ? 'shell' : 'monitor',
+          prompt: command,
+          fork: false,
+          background: true,
+        },
+        now,
       )
+      // timeoutMs 0 = persistent: it runs until stopped
+      if (monitor && typeof out?.timeoutMs === 'number' && out.timeoutMs > 0 && out.persistent !== true) {
+        node.endsAt = now + out.timeoutMs
+      }
       trimmed(flow, keep)
       await saveFlow($)
       if (openOnBackground) {
@@ -701,7 +736,7 @@ export const register: Register = (on, options) => {
     return r
   })
 
-  // A background shell's end comes back only as a task-notification prompt: read its ids and statuses.
+  // A background shell's or monitor's end comes back only as a task-notification prompt: read its ids and statuses.
   on('prompt.submit', async ($, e, next) => {
     if (e.origin.kind === 'task-notification') {
       let changed = false
