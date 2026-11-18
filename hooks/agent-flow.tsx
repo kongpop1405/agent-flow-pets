@@ -1110,10 +1110,10 @@ export const register: Register = (on, options) => {
       // The surfaces with Svg animate it themselves, so the source stays the same between ticks.
       const { Svg } = $.ui.resolve(e)
       const alt = awake ? `${pets.length} running` : 'nothing running'
-      const w = Math.round(width * CELL_W)
-      const h = room * CELL_H
-      // Sized by props as well: without them the editor drew only the alt on a fresh mount.
-      mascotView = <Svg key="pets-svg" source={sceneSvg(pets, w, h)} alt={alt} width={w} height={h} />
+      // not `w`/`h`: a local `h` hides the JSX factory and every element below throws
+      const sceneW = Math.round(width * CELL_W)
+      const sceneH = room * CELL_H
+      mascotView = <Svg key="pets-svg" source={sceneSvg(pets, sceneW, sceneH)} alt={alt} width={sceneW} height={sceneH} />
     }
     return (
       <Box flexDirection="column" minHeight={fill}>
