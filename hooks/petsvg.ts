@@ -17,9 +17,9 @@ const LOOKS: Record<Kind, Look> = {
     belly: '#ffe3c2',
     ears: `<path d="M27 38 L30 12 L47 27 Z" fill="#f4a259" ${EDGE}/><path d="M73 38 L70 12 L53 27 Z" fill="#f4a259" ${EDGE}/>
 <path d="M31 32 L32 19 L41 27 Z" fill="#ffc8a8"/><path d="M69 32 L68 19 L59 27 Z" fill="#ffc8a8"/>`,
+    // whiskers live in catSvg so they can twitch on their own
     face: `<path d="M46 27 v6 M50 26 v7 M54 27 v6" stroke="#d9822b" stroke-width="2" stroke-linecap="round"/>
-<path d="M48 55 h4 l-2 2.5 z" fill="#e5737f"/>
-<path d="M22 55 h10 M22 60 l10 -2 M78 55 h-10 M78 60 l-10 -2" stroke="${INK}" stroke-width="1" opacity=".5"/>`,
+<path d="M48 55 h4 l-2 2.5 z" fill="#e5737f"/>`,
   },
   chick: {
     fur: '#ffd23f',
@@ -135,7 +135,80 @@ ${look.face}${cheeks}${eyes}${mouth}`
         )
         .join('')
     : ''
+  if (m.kind === 'cat') return catSvg(m, i, { eyes, mouth, cheeks, z })
   return `<ellipse cx="50" cy="99" rx="26" ry="3" fill="#000" opacity=".15"/><g>${motion}${pet}</g>${z}`
+}
+
+const spin = (cx: number, cy: number, values: string, dur: number, extra = '') =>
+  `<animateTransform attributeName="transform" type="rotate" values="${values
+    .split(';')
+    .map(a => `${a} ${cx} ${cy}`)
+    .join(';')}" dur="${dur}s" ${extra} repeatCount="indefinite"/>`
+
+/**
+ * The cat is the main loop's mascot, so it gets the most life: each part sits in its own group
+ * so the animations stack instead of replacing one another.
+ */
+function catSvg(m: Mascot, i: number, p: { eyes: string; mouth: string; cheeks: string; z: string }): string {
+  const look = LOOKS.cat
+  const awake = !m.asleep
+  const slow = awake ? 1 : 2.5
+  const tail = `<g>${spin(70, 88, awake ? '-10;18;-10' : '-3;5;-3', awake ? 1.4 : 4)}
+<path d="M70 88 q18 6 15 -15 q-1 -8 6 -10" stroke="${look.fur}" stroke-width="7" fill="none" stroke-linecap="round"/>
+<path d="M89 64 q2 -1 3 -1" stroke="#d9822b" stroke-width="7" stroke-linecap="round"/></g>`
+  // one ear flicks now and then, the other a beat later
+  const ear = (path: string, cx: number, a: number, at: string) =>
+    `<g>${spin(cx, 32, `0;0;${a};0;0`, 4 * slow, `keyTimes="0;${at};${(+at + 0.04).toFixed(2)};${(+at + 0.08).toFixed(2)};1"`)}${path}</g>`
+  const ears = `${ear(
+    `<path d="M27 38 L30 12 L47 27 Z" fill="${look.fur}" ${EDGE}/><path d="M31 32 L32 19 L41 27 Z" fill="#ffc8a8"/>`,
+    38,
+    -14,
+    '0.70',
+  )}${ear(
+    `<path d="M73 38 L70 12 L53 27 Z" fill="${look.fur}" ${EDGE}/><path d="M69 32 L68 19 L59 27 Z" fill="#ffc8a8"/>`,
+    62,
+    14,
+    '0.82',
+  )}`
+  const whisker = (d: string, cx: number, a: number) =>
+    `<g>${spin(cx, 57, `0;${a};0;${-a / 2};0`, 2.2 * slow)}<path d="${d}" stroke="${INK}" stroke-width="1" opacity=".5"/></g>`
+  const whiskers = whisker('M22 55 h10 M22 60 l10 -2', 32, -6) + whisker('M78 55 h-10 M78 60 l-10 -2', 68, 6)
+  // awake: the eyes glance left and right and the mouth opens for a silent mew
+  const glance = awake
+    ? `<g><animateTransform attributeName="transform" type="translate" values="0 0;0 0;-2.5 0;-2.5 0;2.5 0;2.5 0;0 0" keyTimes="0;0.3;0.38;0.55;0.63;0.85;1" dur="6s" repeatCount="indefinite"/>${p.eyes}</g>`
+    : p.eyes
+  const mew = awake
+    ? `<ellipse cx="50" cy="62" rx="2.6" ry="0" fill="#c2405a"><animate attributeName="ry" values="0;0;2.8;2.8;0;0" keyTimes="0;0.6;0.64;0.72;0.76;1" dur="7s" repeatCount="indefinite"/></ellipse>`
+    : ''
+  const head = `<g>${spin(50, 70, awake ? '0;0;-7;-7;0;0;6;6;0' : '0;-3;0', awake ? 7 : 6)}
+${ears}<circle cx="50" cy="48" r="26" fill="${look.fur}" ${EDGE}/>${look.face}${whiskers}${p.cheeks}${glance}${p.mouth}${mew}</g>`
+  // paws knead in turn while it works
+  const paw = (x: number, begin: number) =>
+    `<ellipse cx="${x}" cy="96" rx="7" ry="3.5" fill="${look.fur}" ${EDGE}>${
+      awake
+        ? `<animateTransform attributeName="transform" type="translate" values="0 0;0 -3;0 0;0 0" dur="0.7s" begin="${begin}s" repeatCount="indefinite"/>`
+        : ''
+    }</ellipse>`
+  const body = `${tail}<ellipse cx="50" cy="80" rx="24" ry="17" fill="${look.fur}" ${EDGE}/>
+<ellipse cx="50" cy="83" rx="14" ry="11" fill="${look.belly}"/>${paw(40, 0)}${paw(60, 0.35)}${head}`
+  const delay = (i * 0.23).toFixed(2)
+  // hop with squash on landing and stretch on take-off, scaled from the feet
+  const moved = awake
+    ? `<g><animateTransform attributeName="transform" type="translate" values="0 0;0 -7;0 0;0 0" keyTimes="0;0.4;0.8;1" dur="0.9s" begin="${delay}s" repeatCount="indefinite"/>
+<g transform="translate(50 99)"><g><animateTransform attributeName="transform" type="scale" values="1 1;0.95 1.06;1 1;1.08 0.9;1 1" keyTimes="0;0.3;0.6;0.82;1" dur="0.9s" begin="${delay}s" repeatCount="indefinite"/>
+<g transform="translate(-50 -99)">${body}</g></g></g></g>`
+    : `<g><animateTransform attributeName="transform" type="scale" additive="sum" values="1 1;1.015 0.985;1 1" dur="3s" repeatCount="indefinite"/>${body}</g>`
+  // a heart floats up now and then while it works
+  const heart = awake
+    ? `<path d="M80 22 c-3 -5 -10 -2 -6 4 l6 6 l6 -6 c4 -6 -3 -9 -6 -4 z" fill="#ff6b8a" opacity="0">
+<animate attributeName="opacity" values="0;0;1;0" keyTimes="0;0.55;0.65;1" dur="5s" begin="${delay}s" repeatCount="indefinite"/>
+<animateTransform attributeName="transform" type="translate" values="0 0;0 0;0 -4;3 -16" keyTimes="0;0.55;0.65;1" dur="5s" begin="${delay}s" repeatCount="indefinite"/></path>`
+    : ''
+  return `<ellipse cx="50" cy="99" rx="26" ry="3" fill="#000" opacity=".15">${
+    awake
+      ? `<animate attributeName="rx" values="26;19;26;26" keyTimes="0;0.4;0.8;1" dur="0.9s" begin="${delay}s" repeatCount="indefinite"/>`
+      : ''
+  }</ellipse>${moved}${heart}${p.z}`
 }
 
 /** Columns for `n` cells in a `w`×`h` box: the count that gives the biggest square cell. */
