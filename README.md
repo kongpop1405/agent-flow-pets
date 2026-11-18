@@ -145,6 +145,13 @@ Folded by default; press `▸ Pets` to open the legend:
 | 🦄 | subagent on **Fable** |
 | 🐰 | subagent whose model is not known |
 
+<details>
+<summary>Spoiler: a secret behind the Pets heading</summary>
+
+Each press on `▸ Pets` also swaps the mascot for a real cat (😗 mwah); the next press swaps it back. It shows even while the mascot is hidden, but not in the terminal. Off again after a reload.
+
+</details>
+
 ### Status line
 
 The mod also writes one status line entry, shown whether the pane is open or not:
