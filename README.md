@@ -68,7 +68,6 @@ Agents 1 running · 5 done · 1 failed
 ├─● 🐹 clerk  count logs          4k 2⚒
 ├─● 🐥 pnpm test
 └─ 2 more shells done
-[select agent for details]
 ```
 
 - The header counts agents by status, each in its own colour: running **yellow**, done **gray**, failed **red**, stopped **blue**.
