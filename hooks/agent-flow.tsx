@@ -117,7 +117,8 @@ function resetWatch() {
 // Dirs come from paths the session read or commands it ran, so a repo can be a stranger's: its
 // .git/config must not pick a program for git to run, and a UNC path would reach out to a host.
 const SAFE_GIT = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', '-c', 'core.sshCommand=', '-c', 'protocol.allow=never']
-const remotePath = (dir: string) => /^(\\|\/\/)/.test(dir)
+// two leading separators in any mix (`\\host`, `//host`, `/\host`, `\\?\UNC\`) name another machine
+const remotePath = (dir: string) => /^[\\/]{2}/.test(dir.trim())
 
 /** A repo's whole path, home shown as `~`: two worktrees or junctions can share a last folder name. */
 function repoPath(top: string): string {
@@ -135,7 +136,8 @@ async function topLevel($: EngineInterface, dir: string): Promise<string | undef
   if (remotePath(dir)) return undefined
   if (!topOf.has(dir)) {
     const top = await gitOut($, ['-C', dir, 'rev-parse', '--show-toplevel'])
-    topOf.set(dir, top || null)
+    // a local dir can still resolve to a share (a junction, a mapped drive's worktree): check git's answer too
+    topOf.set(dir, top && !remotePath(top) ? top : null)
     if (topOf.size > 200) topOf.delete(topOf.keys().next().value!)
   }
   return topOf.get(dir) ?? undefined
