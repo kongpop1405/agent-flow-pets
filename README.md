@@ -136,7 +136,7 @@ Folded by default; press `▸ Pets` to open the legend:
 | 🐱 | main loop (your conversation) |
 | 🐥 | background shell command |
 | 🐨 | qwen |
-| 🦉 | lane-home gate-runner |
+| 🦉 | gate-runner |
 | 🐹 | subagent on **Haiku** |
 | 🐶 | subagent on **Sonnet** |
 | 🐼 | subagent on **Opus** |
