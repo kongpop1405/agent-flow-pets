@@ -86,7 +86,8 @@ import { branchText, listed, restoredRepos, touched, touchedDirs } from './repos
 import type { Repos } from './repos.ts'
 import { mascotRows, packRows } from './mascot.ts'
 import type { Kind, Mascot } from './mascot.ts'
-import { sceneSvg } from './petsvg.ts'
+import { sceneSvg, secretSvg } from './petsvg.ts'
+import { REAL_CAT } from './realcat.ts'
 
 const PANE = 'agent-flow'
 const COMMAND = 'agent-flow'
@@ -109,6 +110,10 @@ const MORE_KEY = 'mo:'
 /** Pets is the one section that folds: its legend is long and rarely read. Folded until opened. */
 let petsOpen = false
 const PETS_KEY = 'pets'
+/** Each press on the Pets heading also swaps the mascot for the real cat, and the next swaps it back. */
+let secretOn = false
+const SECRET_ROWS = 8
+const SECRET_MAX_H = 240
 /** Hidden until `show mascot` is pressed; the choice survives reloads, the rows stay blank while hidden. */
 let mascotHidden = true
 const MASCOT_KEY = 'mascot'
@@ -848,8 +853,11 @@ export const register: Register = (on, options) => {
       return r
     }
     if (key === PETS_KEY || key === MASCOT_KEY) {
-      if (key === PETS_KEY) petsOpen = !petsOpen
-      else mascotHidden = !mascotHidden
+      if (key === PETS_KEY) {
+        petsOpen = !petsOpen
+        secretOn = !secretOn
+        if (secretOn) $.ui.toast('😗 mwah')
+      } else mascotHidden = !mascotHidden
       await saveFlow($)
       if (isOpen) $.ui.invalidate('ui.render')
       return r
@@ -1132,7 +1140,16 @@ export const register: Register = (on, options) => {
     const pets = mascots()
     const awake = c.running > 0
     let mascotView: RenderChildren = null
-    if (mascotHidden) mascotView = null
+    // The secret shows even when the mascot is hidden, and the same press opens the legend that
+    // takes the free rows, so it claims SECRET_ROWS and lets the pane scroll instead.
+    if (secretOn && e.surface !== 'terminal') {
+      const { Svg } = $.ui.resolve(e)
+      const sceneW = Math.round(width * CELL_W)
+      // capped at the photo's own height: the engine stills a mod whose animation frame takes
+      // over 100 ms, and the empty rows below the photo would be redrawn every frame too
+      const sceneH = Math.min(Math.max(room, SECRET_ROWS) * CELL_H, SECRET_MAX_H)
+      mascotView = <Svg key="pets-secret" source={secretSvg(REAL_CAT, sceneW, sceneH)} alt="mwah" width={sceneW} height={sceneH} />
+    } else if (mascotHidden) mascotView = null
     else if (e.surface === 'terminal') {
       // one art frame every three ticks, slower than the tree badges
       const lines = mascotRows(pets, room, width, Math.floor(petFrame / 3))

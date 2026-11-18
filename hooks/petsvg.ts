@@ -256,3 +256,33 @@ export function sceneSvg(pets: readonly Mascot[], w: number, h: number, maxCell 
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${parts.join('')}</svg>`
 }
+
+/**
+ * The secret: the real cat photo, animated like a GIF with SMIL — patches over the eyes
+ * and lips move on their own while the whole head wobbles. One embedded JPEG; a multi-frame GIF
+ * would pass the editor's size limit for an Svg source.
+ */
+export function secretSvg(photo: string, w: number, h: number, maxCell = 240): string {
+  const scale = Math.min(w / 200, h / 187, maxCell / 187)
+  const x = (w - 200 * scale) / 2
+  const y = (h - 187 * scale) / 2
+  // clipPath, not a feathered mask: a mask redrawn every frame costs ~15x the cartoon cat
+  const fade = (id: string, cx: number, cy: number, rx: number, ry: number) =>
+    `<clipPath id="${id}"><ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"/></clipPath>`
+  // the patch at (cx,cy) scales or slides about its own centre
+  const patch = (mask: string, cx: number, cy: number, anim: string) =>
+    `<g transform="translate(${cx} ${cy})"><g>${anim}<use href="#photo" transform="translate(${-cx} ${-cy})" clip-path="url(#${mask})"/></g></g>`
+  const glance = `<animateTransform attributeName="transform" type="translate" values="0 0;-3 0;-3 0;2 0;2 0;0 0" keyTimes="0;0.15;0.45;0.6;0.9;1" dur="1.8s" repeatCount="indefinite"/>`
+  const kiss = `<animateTransform attributeName="transform" type="scale" values="1;1.22;1;1.22;1;1" keyTimes="0;0.12;0.24;0.36;0.48;1" dur="1.6s" repeatCount="indefinite"/>`
+  const heart = (k: number) =>
+    `<path d="M168 134 c-3 -5 -10 -2 -6 4 l6 6 l6 -6 c4 -6 -3 -9 -6 -4 z" fill="#ff4d6d" opacity="0">
+<animate attributeName="opacity" values="0;1;0" dur="1.6s" begin="${k * 0.53}s" repeatCount="indefinite"/>
+<animateTransform attributeName="transform" type="translate" values="0 0;${18 + k * 6} -${40 + k * 10}" dur="1.6s" begin="${k * 0.53}s" repeatCount="indefinite"/></path>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+<defs><image id="photo" href="${photo}" width="200" height="187"/>
+${fade('eyeL', 98, 98, 14, 12)}${fade('eyeR', 145, 101, 14, 12)}${fade('lips', 118, 140, 25, 18)}</defs>
+<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${scale.toFixed(3)})">
+<g><animateTransform attributeName="transform" type="rotate" values="-4 100 187;4 100 187;-4 100 187" dur="1.2s" repeatCount="indefinite"/>
+<use href="#photo"/>${patch('eyeL', 98, 98, glance)}${patch('eyeR', 145, 101, glance)}${patch('lips', 118, 140, kiss)}</g>
+${[0, 1, 2].map(heart).join('')}</g></svg>`
+}
