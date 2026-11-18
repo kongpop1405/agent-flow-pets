@@ -112,6 +112,7 @@ The free rows between the Git section and the buttons hold one animal per runnin
 - **Sized to the room:** each pet grows to fill the free rows and shrinks as other sections take them. Many pets wrap onto more rows first, then get smaller; past that the rest are counted as `+N more`.
 - **Editor and desktop:** flat coloured SVG, animated by the surface itself.
 - **Terminal:** no SVG there, so plain-ASCII art in two sizes (7 rows, then 4), hidden when fewer than 4 rows are free.
+- **Hide it:** `hide mascot` beside `▸ Pets` clears the mascot (the rows stay blank); `show mascot` brings it back. It stays hidden across reloads within the session.
 
 ### 7. Workflow and Actions
 
@@ -120,7 +121,7 @@ Two rows of buttons at the bottom of the pane:
 - **Workflow** (`grill spec tickets implement review retro` by default): a press puts `/name ` in the prompt box for you to finish and send. It does not run anything.
 - **Actions** (`commit · verify · checkpoint · handoff` by default): a press runs the command as if you typed it. It waits in the queue until the session is idle.
 
-Both lists are options, so point them at the commands you actually have. In VS Code every pressable item is drawn as a native button in the editor's button colour; a mod cannot change that colour.
+The defaults are the author's own skills. A button is drawn only when its command exists on your machine (the pane reads the slash-command list when the session starts and when you run `/agent-flow`), and a row with no buttons left is hidden with its heading. To get buttons, set `flowButtons` / `skillButtons` (see [Options](#options)) to commands you have, such as built-ins (`init`, `security-review`) or your own skills. In VS Code every pressable item is drawn as a native button in the editor's button colour; a mod cannot change that colour.
 
 ### 8. Pets
 
@@ -134,7 +135,7 @@ Folded by default; press `▸ Pets` to open the legend:
 | --- | --- |
 | 🐱 | main loop (your conversation) |
 | 🐥 | background shell command |
-| 🐨 | qwen run of a lane-home dispatcher (see below) |
+| 🐨 | qwen |
 | 🦉 | lane-home gate-runner |
 | 🐹 | subagent on **Haiku** |
 | 🐶 | subagent on **Sonnet** |

@@ -109,7 +109,20 @@ const MORE_KEY = 'mo:'
 /** Pets is the one section that folds: its legend is long and rarely read. Folded until opened. */
 let petsOpen = false
 const PETS_KEY = 'pets'
+/** The mascot hides on request and stays hidden across reloads; the rows it held stay blank. */
+let mascotHidden = false
+const MASCOT_KEY = 'mascot'
 let homeDir: string | undefined
+/**
+ * Slash commands this machine has, so a button whose skill is not installed is not drawn.
+ * Undefined until the first list arrives; then every configured button shows.
+ */
+let installed: Set<string> | undefined
+const present = (names: string[]) => (installed ? names.filter(n => installed!.has(n)) : names)
+async function loadCommands($: EngineInterface) {
+  const list = await $.command.list().catch(() => undefined)
+  if (list) installed = new Set(list.map(c => c.name))
+}
 
 function resetWatch() {
   watch = createWatch()
@@ -283,7 +296,7 @@ function petOf(node: FlowNode): string {
 const LEGEND = [
   '🐱 main loop',
   '🐥 background shell',
-  '🐨 qwen (lane-home)',
+  '🐨 qwen',
   '🦉 gate-runner',
   '🐹 haiku',
   '🐶 sonnet',
@@ -345,6 +358,7 @@ async function saveFlow($: EngineInterface) {
     repos,
     opened: [...opened],
     petsOpen,
+    mascotHidden,
   })
   await update($, savedAtom, () => text).catch(() => undefined)
 }
@@ -362,6 +376,7 @@ function restored(text: SavedFlow, startedAt: number): Flow | undefined {
       repos?: unknown
       opened?: unknown
       petsOpen?: unknown
+      mascotHidden?: unknown
     }
     if (s.startedAt !== startedAt || !Array.isArray(s.nodes) || !Array.isArray(s.order)) return undefined
     const nodes = new Map<string, FlowNode>()
@@ -370,6 +385,7 @@ function restored(text: SavedFlow, startedAt: number): Flow | undefined {
     watch = restoredWatch(s.watch)
     repos = restoredRepos(s.repos)
     petsOpen = s.petsOpen === true
+    mascotHidden = s.mascotHidden === true
     opened = new Set(Array.isArray(s.opened) ? s.opened.filter((k): k is string => typeof k === 'string') : [])
     const order = (s.order as unknown[]).filter((id): id is string => typeof id === 'string' && nodes.has(id))
     return {
@@ -485,6 +501,7 @@ export const register: Register = (on, options) => {
     if (usage && usage.context.window > 0) flow.window = usage.context.window
     if (adopted(await $.agent.list().catch(() => []), Date.now())) await saveFlow($)
     void seedCwdRepo($)
+    await loadCommands($)
     selected = undefined
     breakdown = undefined
     // Pets animate only while the pane is open; otherwise the tick is a no-op.
@@ -547,6 +564,7 @@ export const register: Register = (on, options) => {
       }
       return { text: 'agent-flow: finished agents cleared' }
     }
+    await loadCommands($)
     const listed = await $.agent.list().catch(() => [])
     synced(flow, listed)
     if (adopted(listed, Date.now())) await saveFlow($)
@@ -794,8 +812,9 @@ export const register: Register = (on, options) => {
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return r
     }
-    if (key === PETS_KEY) {
-      petsOpen = !petsOpen
+    if (key === PETS_KEY || key === MASCOT_KEY) {
+      if (key === PETS_KEY) petsOpen = !petsOpen
+      else mascotHidden = !mascotHidden
       await saveFlow($)
       if (isOpen) $.ui.invalidate('ui.render')
       return r
@@ -894,14 +913,15 @@ export const register: Register = (on, options) => {
     )
 
     // Workflow steps fill the prompt with the command; there is no record of which step is current.
-    const actions = skills.filter(name => !flowSkills.includes(name))
+    const flowShown = present(flowSkills)
+    const actions = present(skills.filter(name => !flowSkills.includes(name)))
     const buttons = (
       <Box key="buttons" flexDirection="column">
-        {flowSkills.length ? (
+        {flowShown.length ? (
           <Box key="wf" marginTop={1} flexDirection="column">
             {sectionHead('wf', 'Workflow')}
             <Box key="flow-skills" flexDirection="row" flexWrap="wrap" columnGap={1}>
-              {flowSkills.map(name => (
+              {flowShown.map(name => (
                 <Button key={`${FLOW_KEY}${name}`} plain label={shortLabel(name)} onPress={noop} />
               ))}
             </Box>
@@ -1068,7 +1088,7 @@ export const register: Register = (on, options) => {
       (chosen ? 3 + detailKids.length : 0) +
       (touchedRepos.length ? 2 + 2 * touchedRepos.length : 0) +
       (watch.compacts.length ? 2 + Math.min(2, watch.compacts.length) : 0) +
-      (flowSkills.length ? 2 + wrapped(flowSkills.map(shortLabel), 1) : 0) +
+      (flowShown.length ? 2 + wrapped(flowShown.map(shortLabel), 1) : 0) +
       (actions.length ? 2 + wrapped(actions.map(shortLabel), 3) : 0) +
       2 +
       (petsOpen ? LEGEND.length + 1 : 0) +
@@ -1077,7 +1097,8 @@ export const register: Register = (on, options) => {
     const pets = mascots()
     const awake = c.running > 0
     let mascotView: RenderChildren = null
-    if (e.surface === 'terminal') {
+    if (mascotHidden) mascotView = null
+    else if (e.surface === 'terminal') {
       // one art frame every three ticks, slower than the tree badges
       const lines = mascotRows(pets, room, width, Math.floor(petFrame / 3))
       mascotView = lines.map((l, i) => (
@@ -1089,7 +1110,10 @@ export const register: Register = (on, options) => {
       // The surfaces with Svg animate it themselves, so the source stays the same between ticks.
       const { Svg } = $.ui.resolve(e)
       const alt = awake ? `${pets.length} running` : 'nothing running'
-      mascotView = <Svg key="pets-svg" source={sceneSvg(pets, Math.round(width * CELL_W), room * CELL_H)} alt={alt} />
+      const w = Math.round(width * CELL_W)
+      const h = room * CELL_H
+      // Sized by props as well: without them the editor drew only the alt on a fresh mount.
+      mascotView = <Svg key="pets-svg" source={sceneSvg(pets, w, h)} alt={alt} width={w} height={h} />
     }
     return (
       <Box flexDirection="column" minHeight={fill}>
@@ -1133,7 +1157,9 @@ export const register: Register = (on, options) => {
         {buttons}
         <Box key="legend" marginTop={1} flexDirection="column">
           <Box key="pets-head" flexDirection="row">
-            <Button key={PETS_KEY} plain label={fit(`${petsOpen ? '▾' : '▸'} Pets · ${LEGEND.length}`, width)} onPress={noop} />
+            <Button key={PETS_KEY} plain label={`${petsOpen ? '▾' : '▸'} Pets · ${LEGEND.length}`} onPress={noop} />
+            <Text dimColor>{' · '}</Text>
+            <Button key={MASCOT_KEY} plain dimColor label={mascotHidden ? 'show mascot' : 'hide mascot'} onPress={noop} />
           </Box>
           {(petsOpen ? LEGEND : []).map((l, i) => (
             <Text key={`lg:${i}`} dimColor>
