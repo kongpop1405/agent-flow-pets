@@ -1,25 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="472" height="470" viewBox="0 0 472 470">
-<rect width="472" height="470" rx="10" fill="#0d1117"/>
-<rect width="472" height="30" rx="10" fill="#161b22"/><rect y="20" width="472" height="10" fill="#161b22"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="468" height="442" viewBox="0 0 468 442">
+<rect width="468" height="442" rx="10" fill="#0d1117"/>
+<rect width="468" height="30" rx="10" fill="#161b22"/><rect y="20" width="468" height="10" fill="#161b22"/>
 <circle cx="18" cy="15" r="5" fill="#f47067"/><circle cx="34" cy="15" r="5" fill="#e3b341"/><circle cx="50" cy="15" r="5" fill="#56d364"/>
-<text x="236.0" y="20" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e">agents · Plan selected</text>
-<g font-family="Cascadia Mono, Consolas, Menlo, monospace" font-size="15" xml:space="preserve" style="white-space:pre">
-<text x="20" y="65"><tspan fill="#56d4dd" font-weight="bold">Agents (3 running · 2 done)</tspan></text>
-<text x="20" y="87"><tspan fill="#e3b341">🐱💨  </tspan><tspan fill="#d4d4d4">main</tspan><tspan fill="#d2a8ff">                          84k 31⚒</tspan></text>
-<text x="20" y="109"><tspan fill="#7d8590">├─</tspan><tspan fill="#e3b341">🦊 💨 </tspan><tspan fill="#d4d4d4" font-weight="bold">Plan  design token refresh</tspan><tspan fill="#d2a8ff">     22k 9⚒</tspan></text>
-<text x="20" y="131"><tspan fill="#7d8590">│ └─</tspan><tspan fill="#56d364">🐹💤  </tspan><tspan fill="#7d8590">Explore  find callers</tspan><tspan fill="#d2a8ff">        6k 4⚒</tspan></text>
-<text x="20" y="153"><tspan fill="#d4d4d4"></tspan></text>
-<text x="20" y="175"><tspan fill="#7d8590">╭──────────────────────────────────────────────╮</tspan></text>
-<text x="20" y="197"><tspan fill="#7d8590">│ </tspan><tspan fill="#d4d4d4" font-weight="bold">🦊 Plan  design token refresh</tspan></text>
-<text x="20" y="219"><tspan fill="#7d8590">│ </tspan><tspan fill="#7d8590">claude-opus-5-5 · running</tspan></text>
-<text x="20" y="241"><tspan fill="#7d8590">│ </tspan><tspan fill="#56d4dd" font-weight="bold">↓ in from main: prompt 1.2k tok</tspan></text>
-<text x="20" y="263"><tspan fill="#7d8590">│ </tspan><tspan fill="#7d8590">  Design how the access token is refreshed</tspan></text>
-<text x="20" y="285"><tspan fill="#7d8590">│ </tspan><tspan fill="#7d8590">  when the API answers 401, keep one in-…</tspan></text>
-<text x="20" y="307"><tspan fill="#7d8590">│ </tspan><tspan fill="#e3b341" font-weight="bold">⚙ 6 requests · ctx 22k (peak 24k) · out 3k</tspan></text>
-<text x="20" y="329"><tspan fill="#7d8590">│ </tspan><tspan fill="#7d8590">  Read src/auth/refresh.ts</tspan></text>
-<text x="20" y="351"><tspan fill="#7d8590">│ </tspan><tspan fill="#7d8590">  Grep refreshToken</tspan></text>
-<text x="20" y="373"><tspan fill="#7d8590">│ </tspan><tspan fill="#7d8590">  Agent find callers of refresh</tspan></text>
-<text x="20" y="395"><tspan fill="#7d8590">│ </tspan><tspan fill="#56d364" font-weight="bold">↑ out to main: still working</tspan></text>
-<text x="20" y="417"><tspan fill="#7d8590">│ </tspan><tspan fill="#7d8590">1 subagents · ↓ 900 · ↑ 650</tspan></text>
-<text x="20" y="439"><tspan fill="#7d8590">╰──────────────────────────────────────────────╯</tspan></text>
+<text x="234.0" y="20" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e">agents</text>
+<g font-family="Cascadia Mono, Consolas, Menlo, monospace" font-size="14" xml:space="preserve">
+<text x="16.0" y="58" fill="#c9d1d9" font-weight="bold" textLength="142.8" lengthAdjust="spacingAndGlyphs">Session · turn 12</text>
+<text x="16.0" y="77" fill="#39c5cf" textLength="58.8" lengthAdjust="spacingAndGlyphs">context</text>
+<text x="83.2" y="77" fill="#c9d1d9" textLength="75.6" lengthAdjust="spacingAndGlyphs">194k/1.0M</text>
+<text x="167.2" y="77" fill="#6e7681" textLength="25.2" lengthAdjust="spacingAndGlyphs">19%</text>
+<text x="16.0" y="96" fill="#27c55c" textLength="8.4" lengthAdjust="spacingAndGlyphs">█</text>
+<text x="24.4" y="96" fill="#31c458" textLength="8.4" lengthAdjust="spacingAndGlyphs">█</text>
+<text x="32.8" y="96" fill="#3bc353" textLength="8.4" lengthAdjust="spacingAndGlyphs">█</text>
+<text x="41.2" y="96" fill="#45c24f" textLength="8.4" lengthAdjust="spacingAndGlyphs">█</text>
+<text x="49.6" y="96" fill="#4fc14b" textLength="8.4" lengthAdjust="spacingAndGlyphs">█</text>
+<text x="58.0" y="96" fill="#59c046" textLength="8.4" lengthAdjust="spacingAndGlyphs">█</text>
+<text x="66.4" y="96" fill="#63bf42" textLength="8.4" lengthAdjust="spacingAndGlyphs">█</text>
+<text x="74.8" y="96" fill="#6dbe3e" textLength="8.4" lengthAdjust="spacingAndGlyphs">█</text>
+<text x="83.2" y="96" fill="#6ebe3d" textLength="268.8" lengthAdjust="spacingAndGlyphs">░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░</text>
+<text x="16.0" y="115" fill="#6e7681" textLength="117.6" lengthAdjust="spacingAndGlyphs">806k remaining</text>
+<text x="16.0" y="153" fill="#39c5cf" font-weight="bold" textLength="50.4" lengthAdjust="spacingAndGlyphs">Agents</text>
+<text x="74.8" y="153" fill="#e3b341" font-weight="bold" textLength="75.6" lengthAdjust="spacingAndGlyphs">1 running</text>
+<text x="158.8" y="153" fill="#8b949e" font-weight="bold" textLength="67.2" lengthAdjust="spacingAndGlyphs">· 1 done</text>
+<text x="16.0" y="172" fill="#8b949e" textLength="8.4" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="32.8" y="172" font-size="13">🐱</text>
+<text x="58.0" y="172" fill="#6e7681" textLength="33.6" lengthAdjust="spacingAndGlyphs">main</text>
+<text x="310.0" y="172" fill="#d2a8ff" textLength="67.2" lengthAdjust="spacingAndGlyphs">194k 42⚒</text>
+<text x="16.0" y="191" fill="#6e7681" textLength="16.8" lengthAdjust="spacingAndGlyphs">├─</text>
+<text x="32.8" y="191" fill="#e3b341" textLength="8.4" lengthAdjust="spacingAndGlyphs">◐</text>
+<text x="49.6" y="191" font-size="13">🐼</text>
+<rect x="72.8" y="178" width="197.2" height="17" rx="3" fill="#1f6feb"/>
+<text x="74.8" y="191" fill="#ffffff" textLength="193.2" lengthAdjust="spacingAndGlyphs">general-purpose  review</text>
+<text x="284.8" y="191" fill="#d2a8ff" textLength="58.8" lengthAdjust="spacingAndGlyphs">61k 12⚒</text>
+<text x="16.0" y="210" fill="#6e7681" textLength="16.8" lengthAdjust="spacingAndGlyphs">└─</text>
+<text x="32.8" y="210" fill="#8b949e" textLength="8.4" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="49.6" y="210" font-size="13">🐹</text>
+<text x="74.8" y="210" fill="#6e7681" textLength="142.8" lengthAdjust="spacingAndGlyphs">clerk  count logs</text>
+<text x="293.2" y="210" fill="#d2a8ff" textLength="42.0" lengthAdjust="spacingAndGlyphs">4k 2⚒</text>
+<text x="16.0" y="229" fill="#6e7681" textLength="403.2" lengthAdjust="spacingAndGlyphs">╭──────────────────────────────────────────────╮</text>
+<text x="16.0" y="248" fill="#6e7681" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="32.8" y="248" font-size="13">🐼</text>
+<text x="58.0" y="248" fill="#c9d1d9" font-weight="bold" textLength="235.2" lengthAdjust="spacingAndGlyphs">general-purpose  review diff</text>
+<text x="16.0" y="267" fill="#6e7681" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="32.8" y="267" fill="#6e7681" textLength="117.6" lengthAdjust="spacingAndGlyphs">opus · running</text>
+<text x="16.0" y="286" fill="#6e7681" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="32.8" y="286" fill="#39c5cf" font-weight="bold" textLength="260.4" lengthAdjust="spacingAndGlyphs">↓ in from main: prompt 1.2k tok</text>
+<text x="16.0" y="305" fill="#6e7681" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="49.6" y="305" fill="#6e7681" textLength="302.4" lengthAdjust="spacingAndGlyphs">Review the auth middleware diff for…</text>
+<text x="16.0" y="324" fill="#6e7681" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="32.8" y="324" fill="#e3b341" font-weight="bold" textLength="369.6" lengthAdjust="spacingAndGlyphs">⚙ 6 requests · ctx 61k (peak 63k) · out 3.1k</text>
+<text x="16.0" y="343" fill="#6e7681" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="49.6" y="343" fill="#6e7681" textLength="268.8" lengthAdjust="spacingAndGlyphs">1.2s Read src/auth/middleware.ts</text>
+<text x="16.0" y="362" fill="#6e7681" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="49.6" y="362" fill="#6e7681" textLength="176.4" lengthAdjust="spacingAndGlyphs">0.4s Grep verifyToken</text>
+<text x="16.0" y="381" fill="#6e7681" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="49.6" y="381" fill="#f47067" textLength="201.6" lengthAdjust="spacingAndGlyphs">2.0s Bash pnpm test auth</text>
+<text x="16.0" y="400" fill="#6e7681" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="32.8" y="400" fill="#56d364" font-weight="bold" textLength="235.2" lengthAdjust="spacingAndGlyphs">↑ out to main: still working</text>
+<text x="16.0" y="419" fill="#6e7681" textLength="403.2" lengthAdjust="spacingAndGlyphs">╰──────────────────────────────────────────────╯</text>
 </g></svg>
