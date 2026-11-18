@@ -107,7 +107,11 @@ Shown after a `/compact` (or an automatic one): when, what triggered it, and the
 
 ### 6. Mascot
 
-A plain-ASCII cat in the middle of the pane: **awake** (yellow) while anything is running, **asleep** (cyan, with Zs) when nothing is.
+The free rows between the Git section and the buttons hold one animal per running loop, the same pet the tree shows for it (main is the cat). They hop and blink while working; with nothing running, the cat sleeps with Zs drifting up.
+
+- **Sized to the room:** each pet grows to fill the free rows and shrinks as other sections take them. Many pets wrap onto more rows first, then get smaller; past that the rest are counted as `+N more`.
+- **Editor and desktop:** flat coloured SVG, animated by the surface itself.
+- **Terminal:** no SVG there, so plain-ASCII art in two sizes (7 rows, then 4), hidden when fewer than 4 rows are free.
 
 ### 7. Workflow and Actions
 
@@ -161,7 +165,7 @@ If you run a lane-home dispatcher (qwen sessions started outside Claude Code), t
 - **The exceptions:** typing `/agent-flow` adds its one-line reply to the transcript (about 20–30 tokens). An **Actions** button runs a command as if you typed it, so that command's turn costs what it would cost typed.
 - **The numbers in the pane are readings, not costs.** They show what your session and subagents already used.
 
-Local cost only: while the pane is open it redraws every 400 ms to animate the cat, it runs `git` to read branches, and it polls `lane-home.sh` every 20 seconds. The tree is kept in session state so a reload does not lose it.
+Local cost only: while the pane is open it redraws every 400 ms to animate the terminal mascots, it runs `git` to read branches, and it polls `lane-home.sh` every 20 seconds. The tree is kept in session state so a reload does not lose it.
 
 ## Options
 

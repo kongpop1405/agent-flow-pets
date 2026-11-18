@@ -35,7 +35,7 @@
  *                        (default "grill-with-docs,to-spec,to-tickets,implement,code-review,retro")
  */
 import { atom, read, update } from 'claude-code'
-import type { ContextCategory, EngineInterface, Register, SessionContextUsage, SessionCost, Timer } from 'claude-code'
+import type { ContextCategory, EngineInterface, Register, RenderChildren, SessionContextUsage, SessionCost, Timer } from 'claude-code'
 
 import type { SavedFlow } from '../types'
 import {
@@ -84,6 +84,9 @@ import {
 import type { Watch } from './watch.ts'
 import { branchText, listed, restoredRepos, touched, touchedDirs } from './repos.ts'
 import type { Repos } from './repos.ts'
+import { mascotRows, packRows } from './mascot.ts'
+import type { Kind, Mascot } from './mascot.ts'
+import { sceneSvg } from './petsvg.ts'
 
 const PANE = 'agent-flow'
 const COMMAND = 'agent-flow'
@@ -380,30 +383,27 @@ function restored(text: SavedFlow, startedAt: number): Flow | undefined {
   }
 }
 
-// The big pet under the tree: plain ASCII so every row is exactly as wide as it looks.
-const BIG_AWAKE = [
-  ['            ', '   /\\_/\\    ', '  ( o.o )   ', '   > ^ <    ', '  /|   |\\   ', ' (_|   |_)~ '],
-  ['            ', '   /\\_/\\    ', '  ( o.o )   ', '   > ^ <    ', '  /|   |\\   ', ' (_|   |_) ~'],
-  ['            ', '   /\\_/\\    ', '  ( ^.^ )   ', '   > ^ <    ', '  /|   |\\   ', ' (_|   |_)~ '],
-  ['            ', '   /\\_/\\    ', '  ( o.o )   ', '   > ^ <    ', '  /|   |\\   ', ' (_|   |_) ~'],
-]
-const BIG_ASLEEP = [
-  ['        z   ', '   /\\_/\\    ', '  ( -.- )   ', '   > ^ <    ', '  (_____)~  ', '            '],
-  ['       Z    ', '   /\\_/\\ z  ', '  ( -.- )   ', '   > ^ <    ', '  (_____)~  ', '            '],
-  ['     Z   z  ', '   /\\_/\\    ', '  ( -.- )   ', '   > ^ <    ', '  (_____)~  ', '            '],
-  ['   Z    Z   ', '   /\\_/\\    ', '  ( -.- )   ', '   > ^ <    ', '  (_____) ~ ', '            '],
-]
-
-function bigPet(width: number): { lines: string[] } {
-  let busy = 0
-  for (const n of flow.nodes.values()) if (n.status === 'running') busy += 1
-  // a slower beat than the tree badges: one art frame every three ticks
-  const beat = Math.floor(petFrame / 3) % 4
-  const art = (busy ? BIG_AWAKE : BIG_ASLEEP)[beat] ?? []
-  return { lines: art.map(l => centred(width, 12) + l) }
+// The mascots: the same animal the tree shows for each running loop, main first then by start;
+// nothing running, the cat asleep.
+const KIND_OF: Record<string, Kind> = {
+  '🐱': 'cat',
+  '🐥': 'chick',
+  '🐨': 'koala',
+  '🦉': 'owl',
+  '🐹': 'hamster',
+  '🐶': 'dog',
+  '🐼': 'panda',
+  '🦄': 'unicorn',
+  '🐰': 'rabbit',
 }
-// Left padding that centres a block `chars` columns wide.
-const centred = (width: number, chars: number) => ' '.repeat(Math.max(0, Math.floor((width - chars) / 2)))
+function mascots(): Mascot[] {
+  const up = [...flow.nodes.values()].filter(n => n.status === 'running')
+  up.sort((a, b) => (a.id === MAIN ? -1 : b.id === MAIN ? 1 : a.startedAt - b.startedAt))
+  return up.length ? up.map(n => ({ kind: KIND_OF[petOf(n)] ?? 'rabbit' })) : [{ kind: 'cat', asleep: true }]
+}
+// Cell size in CSS px for the drawn mascots, near an editor's monospace line.
+const CELL_W = 7.5
+const CELL_H = 17
 
 // Same thresholds as the context-warn hook, so the line and the in-chat warning agree.
 const WARN_AT = 120_000
@@ -921,9 +921,10 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    const detailKids = chosen ? (chosen.id === MAIN ? mainDetail(chosen) : agentDetail(chosen)).filter(Boolean) : []
     const detail = chosen ? (
       <Box key="detail" flexDirection="column" marginTop={1} borderStyle="round" borderDimColor paddingX={1}>
-        {chosen.id === MAIN ? mainDetail(chosen) : agentDetail(chosen)}
+        {detailKids}
       </Box>
     ) : null
 
@@ -1053,9 +1054,43 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    const big = bigPet(width)
     // Docked, the pane is taller than the tree: fill it so the legend sits on the last rows.
     const fill = e.props.placement === 'dock' ? e.props.scroll.bodyRows : undefined
+    // The mascots get the rows the other sections leave, counted from the data each draws;
+    // a miscount only moves them, the spacers above and below still share what is left.
+    const wrapped = (labels: string[], gap: number) => packRows(labels.map(l => l.length), width, gap).length
+    const used =
+      2 +
+      (pct !== undefined ? 1 : 0) +
+      (flow.window && main.contextTokens !== undefined ? 1 : 0) +
+      3 +
+      tree.length +
+      (chosen ? 3 + detailKids.length : 0) +
+      (touchedRepos.length ? 2 + 2 * touchedRepos.length : 0) +
+      (watch.compacts.length ? 2 + Math.min(2, watch.compacts.length) : 0) +
+      (flowSkills.length ? 2 + wrapped(flowSkills.map(shortLabel), 1) : 0) +
+      (actions.length ? 2 + wrapped(actions.map(shortLabel), 3) : 0) +
+      2 +
+      (petsOpen ? LEGEND.length + 1 : 0) +
+      1
+    const room = fill !== undefined ? Math.max(0, fill - used) : 8
+    const pets = mascots()
+    const awake = c.running > 0
+    let mascotView: RenderChildren = null
+    if (e.surface === 'terminal') {
+      // one art frame every three ticks, slower than the tree badges
+      const lines = mascotRows(pets, room, width, Math.floor(petFrame / 3))
+      mascotView = lines.map((l, i) => (
+        <Text key={`big:${i}`} color={awake ? 'yellow' : 'cyan'}>
+          {l || ' '}
+        </Text>
+      ))
+    } else if (room >= 3) {
+      // The surfaces with Svg animate it themselves, so the source stays the same between ticks.
+      const { Svg } = $.ui.resolve(e)
+      const alt = awake ? `${pets.length} running` : 'nothing running'
+      mascotView = <Svg key="pets-svg" source={sceneSvg(pets, Math.round(width * CELL_W), room * CELL_H)} alt={alt} />
+    }
     return (
       <Box flexDirection="column" minHeight={fill}>
         {header}
@@ -1092,11 +1127,7 @@ export const register: Register = (on, options) => {
         {/* docked, the free rows split above and below the mascot so it sits mid-pane */}
         <Box key="spacer-top" flexGrow={1} />
         <Box key="big" marginTop={1} flexDirection="column">
-          {big.lines.map((l, i) => (
-            <Text key={`big:${i}`} color={c.running ? 'yellow' : 'cyan'}>
-              {l}
-            </Text>
-          ))}
+          {mascotView}
         </Box>
         <Box key="spacer" flexGrow={1} />
         {buttons}
