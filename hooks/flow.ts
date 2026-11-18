@@ -13,7 +13,7 @@ export type Usage = {
   cache_creation_input_tokens: number
 }
 
-export type ToolUse = { tool: string; label: string; isError?: boolean }
+export type ToolUse = { tool: string; label: string; isError?: boolean; ms?: number }
 
 export type FlowNode = {
   /** the loop's agent id; `main` for the main loop */
@@ -322,6 +322,27 @@ export function trimmed(flow: Flow, max: number): void {
   }
 }
 
+/** Drops every finished branch, keeps what still runs; answers the ids it dropped. */
+export function forgetFinished(flow: Flow): string[] {
+  const before = [...flow.nodes.keys()]
+  trimmed(flow, 0)
+  return before.filter(id => !flow.nodes.has(id))
+}
+
+/** A /clear: the conversation starts over, so the main loop's turn count and prompt do too. */
+export function restarted(flow: Flow, now: number): string[] {
+  const gone = forgetFinished(flow)
+  const main = flow.nodes.get(MAIN)!
+  flow.turn = 0
+  Object.assign(main, { turn: 0, prompt: '', steps: 0, toolCount: 0, tools: [], outputTokens: 0, startedAt: now })
+  main.answer = undefined
+  main.durationMs = undefined
+  main.peakContext = undefined
+  // still-running agents now belong to turn 0 of the fresh conversation
+  for (const n of flow.nodes.values()) if (n.id !== MAIN) n.turn = 0
+  return gone
+}
+
 export function children(flow: Flow, id: string): FlowNode[] {
   return flow.order.map(x => flow.nodes.get(x)!).filter(n => n && n.parentId === id)
 }
@@ -331,33 +352,72 @@ export function subtree(flow: Flow, id: string): string[] {
 }
 
 export type Row = { node: FlowNode; depth: number; prefix: string }
+/** The line that stands for a parent's older done shells: `hidden` folded away, or 0 once opened. */
+export type MoreRow = { more: string; hidden: number; open: boolean; depth: number; prefix: string }
 
-/** The tree in spawn order, depth first, with its box-drawing prefix. */
-export function rows(flow: Flow): Row[] {
-  const out: Row[] = []
+const RANK: Record<Status, number> = { running: 0, failed: 1, aborted: 2, done: 3 }
+
+/** A node ranks as the most urgent status in its subtree, so a done parent never hides a running or failed child. */
+function rankOf(flow: Flow, node: FlowNode): number {
+  let best = RANK[node.status]
+  for (const id of subtree(flow, node.id)) {
+    const n = flow.nodes.get(id)
+    if (n) best = Math.min(best, RANK[n.status])
+  }
+  return best
+}
+
+/** Siblings running → failed → stopped → done; done newest first, so the ones kept are the latest. */
+export function sortedSiblings(flow: Flow, kids: FlowNode[]): FlowNode[] {
+  const ranked = kids.map((node, i) => ({ node, i, rank: rankOf(flow, node) }))
+  ranked.sort((a, b) => a.rank - b.rank || (a.rank === RANK.done ? b.i - a.i : a.i - b.i))
+  return ranked.map(r => r.node)
+}
+
+export const KEEP_DONE = 3
+
+/**
+ * The tree depth first with its box-drawing prefix. Each parent shows its latest `keepDone` done
+ * background shells and folds the older ones into one line, unless its id is in `opened`;
+ * done agents always show.
+ */
+export function rows(flow: Flow, opened: ReadonlySet<string> = new Set(), keepDone = KEEP_DONE): Array<Row | MoreRow> {
+  const out: Array<Row | MoreRow> = []
   const walk = (id: string, depth: number, lead: string) => {
-    const kids = children(flow, id)
-    kids.forEach((kid, i) => {
-      const last = i === kids.length - 1
+    const sorted = sortedSiblings(flow, children(flow, id))
+    const shells = sorted.filter(n => n.type === 'shell' && rankOf(flow, n) === RANK.done)
+    const folded = new Set(shells.slice(keepDone))
+    const extra = folded.size
+    const open = opened.has(id)
+    const shown = extra && !open ? sorted.filter(n => !folded.has(n)) : sorted
+    const tail = extra ? 1 : 0
+    shown.forEach((kid, i) => {
+      const last = i === shown.length - 1 && !tail
       out.push({ node: kid, depth, prefix: `${lead}${last ? '└─' : '├─'}` })
       walk(kid.id, depth + 1, `${lead}${last ? '  ' : '│ '}`)
     })
+    if (extra) out.push({ more: id, hidden: open ? 0 : extra, open, depth, prefix: `${lead}└─` })
   }
   walk(MAIN, 1, '')
   return out
 }
 
-export function counts(flow: Flow): { running: number; done: number; failed: number } {
+export const isMore = (r: Row | MoreRow): r is MoreRow => 'more' in r
+
+/** Agents by status; stopped stays apart from failed, as the row marks tell them apart. */
+export function counts(flow: Flow): { running: number; done: number; failed: number; stopped: number } {
   let running = 0
   let done = 0
   let failed = 0
+  let stopped = 0
   for (const n of flow.nodes.values()) {
     if (n.id === MAIN) continue
     if (n.status === 'running') running += 1
     else if (n.status === 'done') done += 1
+    else if (n.status === 'aborted') stopped += 1
     else failed += 1
   }
-  return { running, done, failed }
+  return { running, done, failed, stopped }
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -395,6 +455,53 @@ export function fmtDuration(ms: number | undefined): string {
 }
 
 /** `████░░░░` for a percentage, `width` cells. */
+/**
+ * Tokens over window as a whole percentage, from the same pair the pane prints beside it:
+ * the engine's own `percent` once read 36% next to 85.1k/1.0M.
+ */
+export function usedPercent(tokens: number | undefined, window: number | undefined): number | undefined {
+  if (tokens === undefined || !window) return undefined
+  return Math.min(100, Math.round((tokens / window) * 100))
+}
+
+// green → yellow → orange → red; a fixed step at 60/80 jumps, a blend shows the climb
+const BAR_STOPS: Array<[number, [number, number, number]]> = [
+  [0, [34, 197, 94]],
+  [50, [234, 179, 8]],
+  [75, [249, 115, 22]],
+  [100, [239, 68, 68]],
+]
+
+/** Hex color for a usage percentage, blended between the stops above. */
+export function barColor(percent: number): string {
+  const p = Math.min(100, Math.max(0, percent))
+  let i = 0
+  while (i < BAR_STOPS.length - 2 && p > BAR_STOPS[i + 1]![0]) i += 1
+  const [p0, c0] = BAR_STOPS[i]!
+  const [p1, c1] = BAR_STOPS[i + 1]!
+  const t = (p - p0) / (p1 - p0)
+  return '#' + c0.map((v, k) => Math.round(v + (c1[k]! - v) * t).toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * The bar as coloured runs: each filled cell takes the colour of the percentage it stands at, so the
+ * fill shows the climb from green instead of one flat colour; the empty rest comes last with no colour.
+ */
+export function barRuns(percent: number | undefined, width: number): Array<{ text: string; color?: string }> {
+  const w = Math.max(1, Math.floor(width))
+  const p = Math.min(100, Math.max(0, percent ?? 0))
+  const full = Math.round((p / 100) * w)
+  const runs: Array<{ text: string; color?: string }> = []
+  for (let i = 0; i < full; i++) {
+    const color = barColor(((i + 0.5) / w) * 100)
+    const last = runs[runs.length - 1]
+    if (last && last.color === color) last.text += '█'
+    else runs.push({ text: '█', color })
+  }
+  if (w > full) runs.push({ text: '░'.repeat(w - full) })
+  return runs
+}
+
 export function bar(percent: number | undefined, width: number): string {
   const w = Math.max(1, Math.floor(width))
   const p = Math.min(100, Math.max(0, percent ?? 0))
@@ -423,6 +530,24 @@ export const STATUS_MARK: Record<Status, string> = { running: '◐', done: '●'
 export function paneColumns(value: unknown): number {
   const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 52
   return Math.min(120, Math.max(32, n))
+}
+
+export const DEFAULT_SKILL_BUTTONS = ['commit', 'verify-code', 'checkpoint', 'handoff-status']
+/** A button's shown name: the command without the words every reader already knows from the row. */
+export function shortLabel(name: string): string {
+  const short = name.replace(/^(to|code)-/, '').replace(/-(with-docs|code|status)$/, '')
+  return short || name
+}
+export const DEFAULT_FLOW_BUTTONS = ['grill-with-docs', 'to-spec', 'to-tickets', 'implement', 'code-review', 'retro']
+
+/** Command names for the pane's buttons, from a comma list; no slash, nothing a command name cannot be. */
+export function skillButtons(value: unknown, fallback: string[] = DEFAULT_SKILL_BUTTONS): string[] {
+  if (typeof value !== 'string') return fallback
+  return value
+    .split(',')
+    .map(s => s.trim().replace(/^\//, ''))
+    .filter(s => /^[\w:.-]+$/.test(s))
+    .slice(0, 12)
 }
 
 export function maxAgents(value: unknown): number {

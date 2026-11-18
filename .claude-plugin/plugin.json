@@ -1,6 +1,6 @@
 {
   "name": "agent-flow",
-  "version": "0.3.0",
+  "version": "0.6.0",
   "description": "Agent flow with pets (fork of claude-code-templates agent-flow, MIT): a side pane that draws the session's agent flow live: the main loop's context window, every subagent it spawns as a tree, and for each one the context handed down (its prompt, or the whole parent context for a fork), what it did with it (steps, tools, context size) and the answer it handed back up. Docked beside the transcript in the fullscreen layout, above the prompt otherwise. The status line always shows context tokens, percent, cost and session age.",
   "author": {
     "name": "claude-code-templates",
@@ -28,6 +28,18 @@
       "title": "Open on start",
       "description": "Open the pane when the session starts; the engine keeps an unasked pane hidden below 144 columns",
       "default": false
+    },
+    "flowButtons": {
+      "type": "string",
+      "title": "Main flow buttons",
+      "description": "Comma list of the main flow's slash commands, drawn numbered in this order on their own row; a press puts `/name ` in the prompt box (before any draft) to finish and send. Empty for none",
+      "default": "grill-with-docs,to-spec,to-tickets,implement,code-review,retro"
+    },
+    "skillButtons": {
+      "type": "string",
+      "title": "Skill buttons",
+      "description": "Comma list of slash commands drawn as buttons under the header; a press runs it as if typed, queued until the session is idle. Empty for none",
+      "default": "commit,verify-code,checkpoint,handoff-status"
     },
     "openOnAgent": {
       "type": "boolean",

@@ -11,8 +11,13 @@
  *   `/agent-flow` opens it · `/agent-flow clear` forgets finished agents ·
  *   `/agent-flow stop` closes it
  *
- * It only observes: every hook passes its event on unchanged, and the only
- * engine reads are `$.agent.list()` and `$.session.usage()`. The flow is
+ * Beside the tree it watches the work: time and failures per tool and each
+ * compaction. A Git section lists the repos
+ * the session edited, ran git in or read, each with the branch it sits on (the
+ * session's own folder marked (cwd)), re-read after git commands and each turn.
+ *
+ * It only observes: every hook passes its event on unchanged; the engine reads
+ * are `$.agent.list()`, `$.session.usage()` and read-only git calls. The flow is
  * recorded from session start whether the pane is open or not.
  *
  * Needs Claude Code >= 2.1.287.
@@ -23,6 +28,11 @@
  *   openOnStart: boolean open the pane when the session starts (default false)
  *   openOnAgent: boolean open the pane (without focus) when an Agent call spawns a subagent (default true)
  *   openOnBackground: boolean open the pane (without focus) when a shell command goes to the background (default true)
+ *   skillButtons: string comma list of commands drawn as buttons; a press runs it as if typed
+ *                        (default "commit,verify-code,checkpoint,handoff-status", "" for none)
+ *   flowButtons: string  the main flow's commands, drawn numbered in their order on a row above;
+ *                        a press puts `/name ` in the prompt box to finish and send, it does not run
+ *                        (default "grill-with-docs,to-spec,to-tickets,implement,code-review,retro")
  */
 import { atom, read, update } from 'claude-code'
 import type { ContextCategory, EngineInterface, Register, SessionContextUsage, SessionCost, Timer } from 'claude-code'
@@ -30,7 +40,8 @@ import type { ContextCategory, EngineInterface, Register, SessionContextUsage, S
 import type { SavedFlow } from '../types'
 import {
   MAIN,
-  bar,
+  barColor,
+  barRuns,
   completed,
   counts,
   createFlow,
@@ -40,30 +51,144 @@ import {
   fmtDuration,
   fmtTokens,
   laneSynced,
-  mainTurn,
   parseLane,
+  mainTurn,
   maxAgents,
+  forgetFinished,
+  loopId,
   paneColumns,
+  DEFAULT_FLOW_BUTTONS,
+  skillButtons,
+  restarted,
   rows,
+  isMore,
   spawned,
   stepped,
   synced,
   toolLabel,
   toolRan,
   trimmed,
+  usedPercent,
+  STATUS_MARK,
+  shortLabel,
 } from './flow.ts'
 import type { Flow, FlowNode, Status } from './flow.ts'
+import {
+  clock,
+  compacted,
+  createWatch,
+  restoredWatch,
+  timed,
+  topTools,
+} from './watch.ts'
+import type { Watch } from './watch.ts'
+import { branchText, listed, repoName, restoredRepos, touched, touchedDirs } from './repos.ts'
+import type { Repos } from './repos.ts'
 
 const PANE = 'agent-flow'
 const COMMAND = 'agent-flow'
 const KEY = 'ag:'
+const SKILL_KEY = 'sk:'
+const FLOW_KEY = 'fl:'
 
 let flow: Flow = createFlow()
+let watch: Watch = createWatch()
 let isOpen = false
+
+let repos: Repos = {}
+/** dir → its repo's toplevel, null outside any repo: one git spawn per folder, not per call */
+const topOf = new Map<string, string | null>()
+let sessionCwd: string | undefined
+let percentLogged = false
+/** Parents whose older done children are shown in full instead of one `N more done` line. */
+let opened = new Set<string>()
+const MORE_KEY = 'mo:'
+/** Pets is the one section that folds: its legend is long and rarely read. Folded until opened. */
+let petsOpen = false
+const PETS_KEY = 'pets'
+let homeDir: string | undefined
+
+function resetWatch() {
+  watch = createWatch()
+  repos = {}
+  topOf.clear()
+}
+
+async function gitOut($: EngineInterface, args: string[]): Promise<string | undefined> {
+  const r = await $.process.run(['git', ...args], { timeoutMs: 5000 }).catch(() => undefined)
+  return r && r.exitCode === 0 ? r.stdout.trim() : undefined
+}
+
+async function topLevel($: EngineInterface, dir: string): Promise<string | undefined> {
+  if (!topOf.has(dir)) {
+    const top = await gitOut($, ['-C', dir, 'rev-parse', '--show-toplevel'])
+    topOf.set(dir, top || null)
+    if (topOf.size > 200) topOf.delete(topOf.keys().next().value!)
+  }
+  return topOf.get(dir) ?? undefined
+}
+
+async function readBranch($: EngineInterface, top: string): Promise<boolean> {
+  const r = repos[top]
+  if (!r) return false
+  const name = await gitOut($, ['-C', top, 'symbolic-ref', '--short', '-q', 'HEAD'])
+  const branch = branchText(name, name ? undefined : await gitOut($, ['-C', top, 'rev-parse', '--short', 'HEAD']))
+  if (branch === r.branch) return false
+  r.branch = branch
+  return true
+}
+
+/** After a tool call: count it on the repos it worked in; a git command may have switched the branch. */
+async function noteRepos($: EngineInterface, tool: string, input: Record<string, unknown>): Promise<void> {
+  const dirs = touchedDirs(tool, input, sessionCwd, homeDir)
+  if (!dirs.length) return
+  let changed = false
+  for (const { dir, kind } of dirs) {
+    const top = await topLevel($, dir)
+    if (!top) continue
+    const fresh = !repos[top]
+    touched(repos, top, kind, Date.now())
+    changed = true
+    if (fresh || kind === 'git') await readBranch($, top)
+  }
+  if (changed) {
+    await saveFlow($)
+    if (isOpen) $.ui.invalidate('ui.render')
+  }
+}
+
+/** The session's own folder is listed from the start, touched or not, with its branch. */
+async function seedCwdRepo($: EngineInterface): Promise<void> {
+  sessionCwd = await $.session.cwd().catch(() => undefined)
+  homeDir = (await $.env.get('USERPROFILE').catch(() => undefined)) ?? (await $.env.get('HOME').catch(() => undefined))
+  if (!sessionCwd) return
+  const top = await topLevel($, sessionCwd)
+  if (!top) return
+  repos[top] ??= { top, edit: 0, git: 0, read: 0, at: Date.now() }
+  await readBranch($, top)
+  if (isOpen) $.ui.invalidate('ui.render')
+}
+
+/** Branches move outside the tools too (the person's own terminal): re-read them once a turn. */
+async function refreshBranches($: EngineInterface): Promise<void> {
+  let changed = false
+  for (const top of Object.keys(repos)) if (await readBranch($, top)) changed = true
+  if (changed) {
+    await saveFlow($)
+    if (isOpen) $.ui.invalidate('ui.render')
+  }
+}
+
+function loopName(loop: string): string {
+  if (loop === MAIN) return 'main'
+  const n = flow.nodes.get(loop)
+  return n ? fit(`${n.type} ${n.description}`, 40) : `loop ${loop.slice(0, 8)}`
+}
+
 let selected: string | undefined
 let breakdown: ContextCategory[] | undefined
 
-const STATUS_COLOR: Record<Status, string> = { running: 'yellow', done: 'green', failed: 'red', aborted: 'gray' }
+const STATUS_COLOR: Record<Status, string> = { running: 'yellow', done: 'gray', failed: 'red', aborted: 'blue' }
 
 // Pets: the species tells the model tier at a glance, the trailing marks tell the status.
 const PET_TICK_MS = 400
@@ -72,16 +197,23 @@ let petTimer: Timer | undefined
 const SPECIES: [RegExp, string][] = [
   [/haiku/i, '🐹'],
   [/sonnet/i, '🐶'],
-  [/opus/i, '🦊'],
-  [/fable/i, '🐉'],
+  [/opus/i, '🐼'],
+  [/fable/i, '🦄'],
 ]
 // Agents the engine knows but the flow never saw (spawned before this pane's state existed,
 // or lost to a reload) still belong to the session's history: take them in from the list.
 type Listed = { id: string; status: string; type: string; description: string; parentId?: string; name?: string }
+// $.agent.list() keeps a finished agent for a while after it ends: without this, a
+// cleared agent would come straight back the next time the list is adopted.
+const forgotten = new Set<string>()
+function forget(ids: readonly string[]) {
+  for (const id of ids) forgotten.add(id)
+}
+
 function adopted(list: readonly Listed[], now: number): boolean {
   let added = false
   for (const info of list) {
-    if (flow.nodes.has(info.id)) continue
+    if (flow.nodes.has(info.id) || forgotten.has(info.id)) continue
     const tier = /haiku|sonnet|opus|fable/i.exec(`${info.name ?? ''} ${info.description}`)?.[0]
     const node = spawned(
       flow,
@@ -117,20 +249,22 @@ function shellEnded(taskId: string, status: string, now: number): boolean {
 
 function petOf(node: FlowNode): string {
   if (node.id === MAIN) return '🐱'
-  if (node.type === 'shell') return '🐢'
-  if (node.type === 'qwen') return '🐼'
+  if (node.type === 'shell') return '🐥'
+  if (node.type === 'qwen') return '🐨'
   if (node.type === 'gate-run') return '🦉'
   return SPECIES.find(([re]) => node.model !== undefined && re.test(node.model))?.[1] ?? '🐰'
 }
 const LEGEND = [
-  '🐱 main loop       🐢 background shell',
-  '🐼 qwen (lane-home) 🦉 gate-runner',
-  '🐹 haiku   🐶 sonnet   🦊 opus   🐉 fable',
+  '🐱 main loop',
+  '🐥 background shell',
+  '🐨 qwen (lane-home)',
+  '🦉 gate-runner',
+  '🐹 haiku',
+  '🐶 sonnet',
+  '🐼 opus',
+  '🦄 fable',
   '🐰 subagent, model not known',
-  '💨 working         💤 finished',
 ]
-// Stopped, failed or finished: all asleep. The status colour and the detail still tell them apart.
-const RESTING: Record<Status, string> = { running: '', done: '💤', failed: '💤', aborted: '💤' }
 
 // History: module variables start over on a hot reload, $.state does not, so the flow is
 // kept there and read back when the session start it was saved under is still the current one.
@@ -164,28 +298,60 @@ async function pollLane($: EngineInterface): Promise<{ changed: boolean; added: 
 async function openQuietly($: EngineInterface, columns: number) {
   if (isOpen) return
   isOpen = true
+  if (!flow.window) await adoptWindow($)
   await $.ui.open({ id: PANE, title: 'agents', columns }).catch(err => {
     isOpen = false
     $.ui.log(`agent-flow: pane not opened: ${err}`, { to: 'debug' })
   })
 }
+let justCleared = false
 
 async function saveFlow($: EngineInterface) {
   if (sessionStartedAt === undefined) return
-  const text = JSON.stringify({ startedAt: sessionStartedAt, nodes: [...flow.nodes.values()], order: flow.order, turn: flow.turn })
+  const text = JSON.stringify({
+    startedAt: sessionStartedAt,
+    nodes: [...flow.nodes.values()],
+    order: flow.order,
+    turn: flow.turn,
+    // without it a reload draws no bar until the next session.measure
+    window: flow.window,
+    watch,
+    repos,
+    opened: [...opened],
+    petsOpen,
+  })
   await update($, savedAtom, () => text).catch(() => undefined)
 }
 
 function restored(text: SavedFlow, startedAt: number): Flow | undefined {
   if (!text) return undefined
   try {
-    const s = JSON.parse(text) as { startedAt?: unknown; nodes?: unknown; order?: unknown; turn?: unknown }
+    const s = JSON.parse(text) as {
+      startedAt?: unknown
+      nodes?: unknown
+      order?: unknown
+      turn?: unknown
+      window?: unknown
+      watch?: unknown
+      repos?: unknown
+      opened?: unknown
+      petsOpen?: unknown
+    }
     if (s.startedAt !== startedAt || !Array.isArray(s.nodes) || !Array.isArray(s.order)) return undefined
     const nodes = new Map<string, FlowNode>()
     for (const n of s.nodes as FlowNode[]) if (n && typeof n.id === 'string') nodes.set(n.id, n)
     if (!nodes.has(MAIN)) return undefined
+    watch = restoredWatch(s.watch)
+    repos = restoredRepos(s.repos)
+    petsOpen = s.petsOpen === true
+    opened = new Set(Array.isArray(s.opened) ? s.opened.filter((k): k is string => typeof k === 'string') : [])
     const order = (s.order as unknown[]).filter((id): id is string => typeof id === 'string' && nodes.has(id))
-    return { nodes, order, turn: typeof s.turn === 'number' ? s.turn : 0 }
+    return {
+      nodes,
+      order,
+      turn: typeof s.turn === 'number' ? s.turn : 0,
+      window: typeof s.window === 'number' && s.window > 0 ? s.window : undefined,
+    }
   } catch {
     return undefined
   }
@@ -205,23 +371,13 @@ const BIG_ASLEEP = [
   ['   Z    Z   ', '   /\\_/\\    ', '  ( -.- )   ', '   > ^ <    ', '  (_____) ~ ', '            '],
 ]
 
-function bigPet(width: number): { lines: string[]; caption: string } {
+function bigPet(width: number): { lines: string[] } {
   let busy = 0
   for (const n of flow.nodes.values()) if (n.status === 'running') busy += 1
   // a slower beat than the tree badges: one art frame every three ticks
   const beat = Math.floor(petFrame / 3) % 4
   const art = (busy ? BIG_AWAKE : BIG_ASLEEP)[beat] ?? []
-  const caption = busy ? `awake · ${busy} working` : 'asleep · nothing running'
-  // art and caption share one centre line
-  return {
-    lines: art.map(l => centred(width, 12) + l),
-    caption: centred(width, caption.length) + caption,
-  }
-}
-// Fixed width either way, so the tree column does not jitter while a pet runs.
-function petMark(node: FlowNode): string {
-  if (node.status === 'running') return `${petOf(node)}${['💨  ', ' 💨 ', '  💨'][petFrame % 3]}`
-  return `${petOf(node)}${RESTING[node.status]}  `
+  return { lines: art.map(l => centred(width, 12) + l) }
 }
 // Left padding that centres a block `chars` columns wide.
 const centred = (width: number, chars: number) => ' '.repeat(Math.max(0, Math.floor((width - chars) / 2)))
@@ -240,10 +396,18 @@ const sessionAge = (ms: number) => {
 
 let contextLine: string | undefined
 
+// session.measure fires only after a main-thread turn ends, so until then the pane has no window
+// to draw the bar against; $.session.usage() already knows it.
+async function adoptWindow($: EngineInterface) {
+  const usage = await $.session.usage().catch(() => undefined)
+  if (usage && usage.context.window > 0) flow.window = usage.context.window
+}
+
 function contextText(context: SessionContextUsage, cost: SessionCost | undefined, startedAt: number | undefined, now: number) {
   if (context.tokens === undefined) return undefined
   const mark = context.tokens >= HARD_AT ? '🔴' : context.tokens >= WARN_AT ? '🟡' : '🟢'
-  const pct = context.percent === undefined ? '' : ` ${context.percent}%`
+  const p = usedPercent(context.tokens, context.window) ?? context.percent
+  const pct = p === undefined ? '' : ` ${p}%`
   const usd = cost ? ` · $${cost.usd.toFixed(2)}` : ''
   const ms = startedAt === undefined ? NaN : now - startedAt
   return `${mark} context ${shortTokens(context.tokens)}/${shortTokens(context.window)}${pct}${usd}${Number.isFinite(ms) ? ` · ${sessionAge(ms)}` : ''}`
@@ -257,6 +421,7 @@ function statusText(): string | undefined {
     const c = counts(flow)
     const agents = [`${c.running} running`, `${c.done} done`]
     if (c.failed) agents.push(`${c.failed} failed`)
+    if (c.stopped) agents.push(`${c.stopped} stopped`)
     parts.push(`agents ${agents.join(' · ')}`)
   }
   return parts.length ? parts.join(' │ ') : undefined
@@ -282,16 +447,21 @@ export const register: Register = (on, options) => {
   const openOnStart = options.openOnStart === true
   const openOnAgent = options.openOnAgent !== false
   const openOnBackground = options.openOnBackground !== false
+  const skills = skillButtons(options.skillButtons)
+  const flowSkills = skillButtons(options.flowButtons, DEFAULT_FLOW_BUTTONS)
 
   on('session.start', async ($, e, next) => {
     const r = await next(e)
     flow = createFlow(Date.now())
+    resetWatch()
     const usage = await $.session.usage().catch(() => undefined)
     sessionStartedAt = usage?.startedAt
     if (usage) contextLine = contextText(usage.context, usage.cost, usage.startedAt, await $.clock.now())
     $.ui.status(statusText())
     if (sessionStartedAt !== undefined) flow = restored(await read($, savedAtom), sessionStartedAt) ?? flow
+    if (usage && usage.context.window > 0) flow.window = usage.context.window
     if (adopted(await $.agent.list().catch(() => []), Date.now())) await saveFlow($)
+    void seedCwdRepo($)
     selected = undefined
     breakdown = undefined
     // Pets animate only while the pane is open; otherwise the tick is a no-op.
@@ -345,7 +515,8 @@ export const register: Register = (on, options) => {
       return { text: 'agent-flow closed' }
     }
     if (arg === 'clear') {
-      trimmed(flow, counts(flow).running)
+      forget(forgetFinished(flow))
+      await saveFlow($)
       selected = undefined
       if (isOpen) {
         $.ui.status(statusText())
@@ -356,6 +527,7 @@ export const register: Register = (on, options) => {
     const listed = await $.agent.list().catch(() => [])
     synced(flow, listed)
     if (adopted(listed, Date.now())) await saveFlow($)
+    if (!flow.window) await adoptWindow($)
     try {
       await $.ui.open({ id: PANE, title: 'agents', focus: true, columns })
     } catch (err) {
@@ -369,13 +541,34 @@ export const register: Register = (on, options) => {
     const hint = e.presentation.isFullscreen
       ? 'click an agent, or Tab and Enter'
       : 'drawn above the prompt; /tui fullscreen docks it beside the transcript'
-    return { text: `${c.running + c.done + c.failed} agents so far · ${hint} · /${COMMAND} stop closes` }
+    return { text: `${c.running + c.done + c.failed + c.stopped} agents so far · ${hint} · /${COMMAND} stop closes` }
+  })
+
+  // /clear fires no session.start, only this: the process stays, so the flow must drop what finished itself.
+  on('session.end', async ($, e, next) => {
+    if (e.reason !== 'clear') return next(e)
+    forget(restarted(flow, Date.now()))
+    resetWatch()
+    selected = undefined
+    breakdown = undefined
+    justCleared = true
+    if (isOpen) {
+      $.ui.status(statusText())
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
   })
 
   on('turn.start', async ($, e, next) => {
     // Since Claude Code 2.1.299 a subagent's or teammate's turn starts here too (its prompt in `e.text`).
     // Subagents enter the flow through agent.spawn.
     if (e.agentId !== undefined) return next(e)
+    // The saved flow is keyed by session start, which /clear moved: re-key it so a reload still finds it.
+    if (justCleared) {
+      justCleared = false
+      const usage = await $.session.usage().catch(() => undefined)
+      if (usage) sessionStartedAt = usage.startedAt
+    }
     mainTurn(flow, e.text, Date.now())
     if (isOpen) {
       $.ui.status(statusText())
@@ -427,21 +620,22 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     const use = { tool: e.tool, label: toolLabel(e.tool, e as unknown as Record<string, unknown>) }
-    toolRan(flow, e.agentId, use, Date.now())
+    const start = Date.now()
+    toolRan(flow, e.agentId, use, start)
     if (isOpen) {
       $.ui.status(statusText())
       $.ui.invalidate('ui.render')
     }
     const r = await next(e)
-    if (r.deny !== undefined || r.isError) {
-      Object.assign(use, { isError: true })
-      if (isOpen) {
-        $.ui.status(statusText())
-        $.ui.invalidate('ui.render')
-      }
-    }
-    // A shell sent to the background (asked for, or moved there by its timeout) joins the flow as a pet.
+    const end = Date.now()
+    const failed = r.deny !== undefined || r.isError === true
+    Object.assign(use, { ms: end - start }, failed ? { isError: true } : {})
+    timed(watch, e.tool, end - start, failed)
     const fields = e as unknown as Record<string, unknown>
+    if (isOpen) $.ui.status(statusText())
+    // after the result, never awaited: git spawns must not hold the tool's answer back
+    if (!failed) void noteRepos($, e.tool, fields)
+    // A shell sent to the background (asked for, or moved there by its timeout) joins the flow as a pet.
     const bgId = (r.result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
     // Windows sessions run background commands through the PowerShell tool, not Bash.
     if ((e.tool === 'Bash' || e.tool === 'PowerShell') && typeof bgId === 'string') {
@@ -485,6 +679,23 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e)
+    // precompute only prepares a summary for later; the compaction that installs it fires on its own
+    if (e.trigger === 'precompute') return r
+    compacted(watch, {
+      at: Date.now(),
+      loop: loopId(e.agentId),
+      trigger: e.trigger,
+      before: r.skip === undefined ? r.tokensBefore : undefined,
+      after: r.skip === undefined ? r.tokensAfter : undefined,
+      skip: r.skip,
+    })
+    await saveFlow($)
+    if (isOpen) $.ui.invalidate('ui.render')
+    return r
+  })
+
   // the context handed back up: a subagent's final answer
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
@@ -496,6 +707,7 @@ export const register: Register = (on, options) => {
     )
     if (!e.agentId) synced(flow, await $.agent.list().catch(() => []))
     await saveFlow($)
+    if (!e.agentId) void refreshBranches($)
     if (isOpen) {
       $.ui.status(statusText())
       $.ui.invalidate('ui.render')
@@ -506,7 +718,16 @@ export const register: Register = (on, options) => {
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
     flow.window = e.context.window
-    flow.percent = e.context.percent
+    flow.percent = usedPercent(e.context.tokens, e.context.window) ?? e.context.percent
+    // The engine's percent once disagreed with its own tokens/window: keep the raw pair to find out why.
+    if (!percentLogged && e.context.percent !== undefined && flow.percent !== undefined &&
+        Math.abs(e.context.percent - flow.percent) > 2) {
+      percentLogged = true
+      $.ui.log(
+        `agent-flow: engine context percent ${e.context.percent}% vs tokens ${e.context.tokens}/${e.context.window} = ${flow.percent}%`,
+        { to: 'debug' },
+      )
+    }
     const main = flow.nodes.get(MAIN)
     if (main && e.context.tokens !== undefined) main.contextTokens = e.context.tokens
     contextLine = contextText(e.context, e.cost, sessionStartedAt, await $.clock.now())
@@ -529,12 +750,43 @@ export const register: Register = (on, options) => {
     // already replaced; the press is still read from e.element below.
     const r = await next(e).catch(() => ({ element: e.element }))
     const key = e.element
+    // The flow's skills each need a topic or input after the name, so they go to the prompt box
+    // for the person to finish and send; the draft already typed stays after the command.
+    if (key.startsWith(FLOW_KEY)) {
+      const command = `/${key.slice(FLOW_KEY.length)} `
+      const draft = (await $.prompt.read()).text.replace(/^\/\S+\s*/, '')
+      const filled = await $.prompt.fill({ text: command + draft, cursor: command.length }).catch(() => undefined)
+      if (!filled?.isFilled) $.ui.toast(`${command.trim()}: the prompt box is not available right now`)
+      return r
+    }
+    if (key.startsWith(SKILL_KEY)) {
+      const command = key.slice(SKILL_KEY.length)
+      // Not awaited: it resolves when the command's whole turn ends, and the press must answer now.
+      // The engine queues it until the session is idle, as if typed.
+      $.command.run({ command }).catch(err => $.ui.toast(`/${command} did not run: ${err}`, { timeoutMs: 8000 }))
+      $.ui.toast(`▶ /${command}`)
+      return r
+    }
     if (key === 'close') {
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return r
     }
+    if (key === PETS_KEY) {
+      petsOpen = !petsOpen
+      await saveFlow($)
+      if (isOpen) $.ui.invalidate('ui.render')
+      return r
+    }
+    if (key.startsWith(MORE_KEY)) {
+      const parent = key.slice(MORE_KEY.length)
+      if (!opened.delete(parent)) opened.add(parent)
+      await saveFlow($)
+      if (isOpen) $.ui.invalidate('ui.render')
+      return r
+    }
     if (key === 'clear') {
-      trimmed(flow, counts(flow).running)
+      forget(forgetFinished(flow))
+      await saveFlow($)
       if (selected && !flow.nodes.has(selected)) selected = undefined
     } else if (key === 'refresh') {
       synced(flow, await $.agent.list().catch(() => []))
@@ -556,24 +808,33 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE) return next(e)
+    // Being drawn means it is open: a hot reload or a resume resets isOpen while the engine keeps
+    // the pane placed, and every redraw is gated on it, so the pane froze until a click redrew it.
+    isOpen = true
     const { Box, Text, Button } = $.ui.resolve(e)
     const width = Math.max(24, e.props.bodyColumns - 1)
     const noop = () => {}
     const main = flow.nodes.get(MAIN)!
-    const tree = rows(flow)
+    const tree = rows(flow, opened)
     const c = counts(flow)
     const chosen = selected ? flow.nodes.get(selected) : undefined
+    const pct = usedPercent(main.contextTokens, flow.window) ?? flow.percent
+    const sectionHead = (name: string, title: string) => (
+      <Text key={`sh:${name}`} color="cyan" bold>
+        {fit(title, width)}
+      </Text>
+    )
 
     const agentRow = (node: FlowNode, prefix: string) => {
       const ctx = node.contextTokens !== undefined ? fmtTokens(node.contextTokens) : ''
       const tools = node.toolCount ? `${node.toolCount}⚒` : ''
       const right = [ctx, tools].filter(Boolean).join(' ')
-      const room = width - prefix.length - 2 - (right ? right.length + 1 : 0)
+      const room = width - prefix.length - 4 - (right ? right.length + 1 : 0)
       const name = node.id === MAIN ? 'main' : `${node.type}${node.fork ? ' (fork)' : ''}  ${node.description}`
       return (
         <Box key={`row:${node.id}`} flexDirection="row">
           {prefix ? <Text dimColor>{prefix}</Text> : null}
-          <Text color={STATUS_COLOR[node.status]}>{`${petMark(node)} `}</Text>
+          <Text color={STATUS_COLOR[node.status]}>{`${STATUS_MARK[node.status]} ${petOf(node)} `}</Text>
           <Button
             key={`${KEY}${node.id}`}
             plain
@@ -592,14 +853,48 @@ export const register: Register = (on, options) => {
         <Text>
           <Text color="cyan">{'context '}</Text>
           {`${fmtTokens(main.contextTokens)}${flow.window ? `/${fmtTokens(flow.window)}` : ''}`}
-          {flow.percent !== undefined ? <Text dimColor>{` ${flow.percent}%`}</Text> : null}
+          {pct !== undefined ? <Text dimColor>{` ${pct}%`}</Text> : null}
         </Text>
-        {flow.percent !== undefined ? (
-          <Text color={flow.percent > 80 ? 'red' : flow.percent > 60 ? 'yellow' : 'green'}>
-            {bar(flow.percent, Math.min(width, 40))}
+        {pct !== undefined ? (
+          <Text>
+            {barRuns(pct, Math.min(width, 40)).map((run, i) => (
+              <Text key={`bar:${i}`} color={run.color ?? barColor(pct)}>
+                {run.text}
+              </Text>
+            ))}
           </Text>
         ) : null}
-        {main.prompt ? <Text dimColor wrap="truncate-end">{`› ${main.prompt.replace(/\s+/g, ' ')}`}</Text> : null}
+        {flow.window && main.contextTokens !== undefined ? (
+          <Text dimColor>{fit(`${fmtTokens(Math.max(0, flow.window - main.contextTokens))} remaining`, width)}</Text>
+        ) : null}
+      </Box>
+    )
+
+    // Workflow steps fill the prompt with the command; there is no record of which step is current.
+    const actions = skills.filter(name => !flowSkills.includes(name))
+    const buttons = (
+      <Box key="buttons" flexDirection="column">
+        {flowSkills.length ? (
+          <Box key="wf" marginTop={1} flexDirection="column">
+            {sectionHead('wf', 'Workflow')}
+            <Box key="flow-skills" flexDirection="row" flexWrap="wrap" columnGap={1}>
+              {flowSkills.map(name => (
+                <Button key={`${FLOW_KEY}${name}`} plain label={shortLabel(name)} onPress={noop} />
+              ))}
+            </Box>
+          </Box>
+        ) : null}
+        {actions.length ? (
+          <Box key="ac" marginTop={1} flexDirection="column">
+            {sectionHead('ac', 'Actions')}
+            <Box key="skills" flexDirection="row" flexWrap="wrap" columnGap={1}>
+              {actions.flatMap((name, i) => [
+                ...(i ? [<Text key={`ss:${i}`} dimColor>{'·'}</Text>] : []),
+                <Button key={`${SKILL_KEY}${name}`} plain label={shortLabel(name)} onPress={noop} />,
+              ])}
+            </Box>
+          </Box>
+        ) : null}
       </Box>
     )
 
@@ -628,6 +923,16 @@ export const register: Register = (on, options) => {
               </Text>
             ))
           : [<Text key="nb" dimColor>{'press refresh to read the breakdown'}</Text>]),
+        <Text key="th" color="cyan" bold>{'tools by time (session)'}</Text>,
+        ...(Object.keys(watch.stats).length
+          ? topTools(watch, 8).map((s, i) => (
+              <Text key={`ts:${i}`}>
+                {fit(s.tool, 14).padEnd(14)}
+                <Text dimColor>{`${String(s.calls).padStart(4)}× avg ${fmtDuration(Math.round(s.totalMs / s.calls)).padStart(6)} max ${fmtDuration(s.maxMs).padStart(6)}`}</Text>
+                {s.fails ? <Text color="red">{` ${s.fails} failed`}</Text> : null}
+              </Text>
+            ))
+          : [<Text key="tn" dimColor>{'no tool calls yet'}</Text>]),
       ]
     }
 
@@ -658,7 +963,7 @@ export const register: Register = (on, options) => {
         </Text>,
         ...node.tools.slice(-5).map((u, i) => (
           <Text key={`u:${i}`} color={u.isError ? 'red' : undefined} dimColor={!u.isError}>
-            {fit(`  ${u.tool} ${u.label}`, w)}
+            {fit(`  ${u.ms !== undefined ? `${fmtDuration(u.ms)} ` : ''}${u.tool} ${u.label}`, w)}
           </Text>
         )),
         node.toolCount > 5 ? <Text key="more" dimColor>{`  … ${node.toolCount} tool calls in all`}</Text> : null,
@@ -685,6 +990,46 @@ export const register: Register = (on, options) => {
       return out
     }
 
+    const watchBlock = (
+      <Box key="watch" marginTop={1} flexDirection="column">
+        {watch.compacts.length ? sectionHead('compacts', `Compactions · ${watch.compacts.length}`) : null}
+        {watch.compacts.slice(-2).map((c, i) => (
+          <Text key={`cp:${i}`} dimColor>
+            {fit(
+              `${clock(c.at)} ${c.trigger} ${loopName(c.loop)} ${c.skip !== undefined ? `skipped: ${c.skip}` : `${fmtTokens(c.before)} → ${fmtTokens(c.after)}`}`,
+              width,
+            )}
+          </Text>
+        ))}
+      </Box>
+    )
+
+    const touchedRepos = listed(repos)
+    const cwdTop = sessionCwd ? topOf.get(sessionCwd) ?? undefined : undefined
+    const gitBlock = (
+      <Box key="git" marginTop={1} flexDirection="column">
+        {sectionHead('git', `Git · ${touchedRepos.length} repo${touchedRepos.length === 1 ? '' : 's'}`)}
+        {touchedRepos.map(r => {
+          const used = [r.edit ? `${r.edit}✎` : '', r.git ? `${r.git} git` : '', r.read ? `${r.read} read` : '']
+            .filter(Boolean)
+            .join(' ')
+          const name = `${repoName(r.top)}${r.top === cwdTop ? ' (cwd)' : ''}`
+          return (
+            <Box key={`repo:${r.top}`} flexDirection="column">
+              <Text>
+                <Text color={r.edit ? 'yellow' : undefined} dimColor={!r.edit && !r.git}>{fit(name, width)}</Text>
+                {used ? <Text dimColor>{fit(`  ${used}`, Math.max(0, width - name.length))}</Text> : null}
+              </Text>
+              <Text>
+                <Text dimColor>{'  └─'}</Text>
+                <Text color="green">{fit(` ⎇ ${r.branch ?? '…'}`, Math.max(4, width - 4))}</Text>
+              </Text>
+            </Box>
+          )
+        })}
+      </Box>
+    )
+
     const big = bigPet(width)
     // Docked, the pane is taller than the tree: fill it so the legend sits on the last rows.
     const fill = e.props.placement === 'dock' ? e.props.scroll.bodyRows : undefined
@@ -692,37 +1037,64 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" minHeight={fill}>
         {header}
         <Box key="ag-head" marginTop={1}>
-          <Text bold color="cyan">
-            {fit(`Agents (${c.running} running · ${c.done} done${c.failed ? ` · ${c.failed} failed` : ''})`, width)}
+          {/* each count in its status colour, so a failure reads red in the header too */}
+          <Text bold wrap="truncate-end">
+            <Text color="cyan">{'Agents '}</Text>
+            <Text color={STATUS_COLOR.running}>{`${c.running} running`}</Text>
+            <Text color={STATUS_COLOR.done}>{` · ${c.done} done`}</Text>
+            {c.failed ? <Text color={STATUS_COLOR.failed}>{` · ${c.failed} failed`}</Text> : null}
+            {c.stopped ? <Text color={STATUS_COLOR.aborted}>{` · ${c.stopped} stopped`}</Text> : null}
           </Text>
         </Box>
         {agentRow(main, '')}
-        {tree.map(r => agentRow(r.node, r.prefix))}
+        {tree.map(r =>
+          isMore(r) ? (
+            <Box key={`more:${r.more}`} flexDirection="row">
+              <Text dimColor>{r.prefix}</Text>
+              <Button
+                key={`${MORE_KEY}${r.more}`}
+                plain
+                dimColor
+                label={fit(r.open ? ' show fewer shells' : ` ${r.hidden} more shells done`, Math.max(4, width - r.prefix.length))}
+                onPress={noop}
+              />
+            </Box>
+          ) : (
+            agentRow(r.node, r.prefix)
+          ),
+        )}
         {tree.length === 0 ? <Text dimColor>{fit('  no subagents yet', width)}</Text> : null}
-        {detail}
+        {chosen ? detail : <Text dimColor>{fit('[select agent for details]', width)}</Text>}
+        {touchedRepos.length ? gitBlock : null}
+        {watch.compacts.length ? watchBlock : null}
+        {/* docked, the free rows split above and below the mascot so it sits mid-pane */}
+        <Box key="spacer-top" flexGrow={1} />
         <Box key="big" marginTop={1} flexDirection="column">
           {big.lines.map((l, i) => (
             <Text key={`big:${i}`} color={c.running ? 'yellow' : 'cyan'}>
               {l}
             </Text>
           ))}
-          <Text dimColor>{fit(big.caption, width)}</Text>
         </Box>
         <Box key="spacer" flexGrow={1} />
+        {buttons}
         <Box key="legend" marginTop={1} flexDirection="column">
-          <Text bold color="cyan">{fit('Pets', width)}</Text>
-          {LEGEND.map((l, i) => (
+          <Box key="pets-head" flexDirection="row">
+            <Button key={PETS_KEY} plain label={fit(`${petsOpen ? '▾' : '▸'} Pets · ${LEGEND.length}`, width)} onPress={noop} />
+          </Box>
+          {(petsOpen ? LEGEND : []).map((l, i) => (
             <Text key={`lg:${i}`} dimColor>
               {fit(l, width)}
             </Text>
           ))}
-          <Text>
-            <Text dimColor>{'colour: '}</Text>
-            <Text color={STATUS_COLOR.running}>{'running '}</Text>
-            <Text color={STATUS_COLOR.done}>{'done '}</Text>
-            <Text color={STATUS_COLOR.failed}>{'failed '}</Text>
-            <Text color={STATUS_COLOR.aborted}>{'stopped'}</Text>
-          </Text>
+          {petsOpen ? (
+            <Text>
+              <Text color={STATUS_COLOR.running}>{'running '}</Text>
+              <Text color={STATUS_COLOR.done}>{'done '}</Text>
+              <Text color={STATUS_COLOR.failed}>{'failed '}</Text>
+              <Text color={STATUS_COLOR.aborted}>{'stopped'}</Text>
+            </Text>
+          ) : null}
         </Box>
       </Box>
     )
