@@ -82,7 +82,7 @@ import {
   topTools,
 } from './watch.ts'
 import type { Watch } from './watch.ts'
-import { branchText, listed, repoName, restoredRepos, touched, touchedDirs } from './repos.ts'
+import { branchText, listed, restoredRepos, touched, touchedDirs } from './repos.ts'
 import type { Repos } from './repos.ts'
 
 const PANE = 'agent-flow'
@@ -114,12 +114,25 @@ function resetWatch() {
   topOf.clear()
 }
 
+// Dirs come from paths the session read or commands it ran, so a repo can be a stranger's: its
+// .git/config must not pick a program for git to run, and a UNC path would reach out to a host.
+const SAFE_GIT = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', '-c', 'core.sshCommand=', '-c', 'protocol.allow=never']
+const remotePath = (dir: string) => /^(\\|\/\/)/.test(dir)
+
+/** A repo's whole path, home shown as `~`: two worktrees or junctions can share a last folder name. */
+function repoPath(top: string): string {
+  const t = top.replace(/\\/g, '/')
+  const h = homeDir?.replace(/\\/g, '/').replace(/\/+$/, '')
+  return h && t.toLowerCase().startsWith(`${h.toLowerCase()}/`) ? `~${t.slice(h.length)}` : t
+}
+
 async function gitOut($: EngineInterface, args: string[]): Promise<string | undefined> {
-  const r = await $.process.run(['git', ...args], { timeoutMs: 5000 }).catch(() => undefined)
+  const r = await $.process.run(['git', ...SAFE_GIT, ...args], { timeoutMs: 5000 }).catch(() => undefined)
   return r && r.exitCode === 0 ? r.stdout.trim() : undefined
 }
 
 async function topLevel($: EngineInterface, dir: string): Promise<string | undefined> {
+  if (remotePath(dir)) return undefined
   if (!topOf.has(dir)) {
     const top = await gitOut($, ['-C', dir, 'rev-parse', '--show-toplevel'])
     topOf.set(dir, top || null)
@@ -133,6 +146,12 @@ async function readBranch($: EngineInterface, top: string): Promise<boolean> {
   if (!r) return false
   const name = await gitOut($, ['-C', top, 'symbolic-ref', '--short', '-q', 'HEAD'])
   const branch = branchText(name, name ? undefined : await gitOut($, ['-C', top, 'rev-parse', '--short', 'HEAD']))
+  // neither a branch nor a commit: the folder is no repo now (a worktree removed after its work)
+  if (branch === undefined) {
+    delete repos[top]
+    topOf.forEach((t, dir) => t === top && topOf.delete(dir))
+    return true
+  }
   if (branch === r.branch) return false
   r.branch = branch
   return true
@@ -1013,7 +1032,7 @@ export const register: Register = (on, options) => {
           const used = [r.edit ? `${r.edit}✎` : '', r.git ? `${r.git} git` : '', r.read ? `${r.read} read` : '']
             .filter(Boolean)
             .join(' ')
-          const name = `${repoName(r.top)}${r.top === cwdTop ? ' (cwd)' : ''}`
+          const name = `${repoPath(r.top)}${r.top === cwdTop ? ' (cwd)' : ''}`
           return (
             <Box key={`repo:${r.top}`} flexDirection="column">
               <Text>
@@ -1063,8 +1082,7 @@ export const register: Register = (on, options) => {
             agentRow(r.node, r.prefix)
           ),
         )}
-        {tree.length === 0 ? <Text dimColor>{fit('  no subagents yet', width)}</Text> : null}
-        {chosen ? detail : <Text dimColor>{fit('[select agent for details]', width)}</Text>}
+        {detail}
         {touchedRepos.length ? gitBlock : null}
         {watch.compacts.length ? watchBlock : null}
         {/* docked, the free rows split above and below the mascot so it sits mid-pane */}
