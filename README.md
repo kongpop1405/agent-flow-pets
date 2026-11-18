@@ -112,7 +112,7 @@ The free rows between the Git section and the buttons hold one animal per runnin
 - **Sized to the room:** each pet grows to fill the free rows and shrinks as other sections take them. Many pets wrap onto more rows first, then get smaller; past that the rest are counted as `+N more`.
 - **Editor and desktop:** flat coloured SVG, animated by the surface itself.
 - **Terminal:** no SVG there, so plain-ASCII art in two sizes (7 rows, then 4), hidden when fewer than 4 rows are free.
-- **Hide it:** `hide mascot` beside `▸ Pets` clears the mascot (the rows stay blank); `show mascot` brings it back. It stays hidden across reloads within the session.
+- **Off by default:** press `show mascot` beside `▸ Pets` to draw it; `hide mascot` clears it again (the rows stay blank). The choice holds across reloads within the session. In VS Code the picture sometimes shows only its caption (`nothing running`) right after the pane opens; `hide mascot` then `show mascot` redraws it.
 
 ### 7. Workflow and Actions
 

@@ -109,8 +109,8 @@ const MORE_KEY = 'mo:'
 /** Pets is the one section that folds: its legend is long and rarely read. Folded until opened. */
 let petsOpen = false
 const PETS_KEY = 'pets'
-/** The mascot hides on request and stays hidden across reloads; the rows it held stay blank. */
-let mascotHidden = false
+/** Hidden until `show mascot` is pressed; the choice survives reloads, the rows stay blank while hidden. */
+let mascotHidden = true
 const MASCOT_KEY = 'mascot'
 let homeDir: string | undefined
 /**
@@ -385,7 +385,7 @@ function restored(text: SavedFlow, startedAt: number): Flow | undefined {
     watch = restoredWatch(s.watch)
     repos = restoredRepos(s.repos)
     petsOpen = s.petsOpen === true
-    mascotHidden = s.mascotHidden === true
+    mascotHidden = s.mascotHidden !== false
     opened = new Set(Array.isArray(s.opened) ? s.opened.filter((k): k is string => typeof k === 'string') : [])
     const order = (s.order as unknown[]).filter((id): id is string => typeof id === 'string' && nodes.has(id))
     return {
