@@ -107,6 +107,7 @@ let percentLogged = false
 /** Parents whose older done children are shown in full instead of one `N more done` line. */
 let opened = new Set<string>()
 const MORE_KEY = 'mo:'
+const STOP_KEY = 'st:'
 /** Pets is the one section that folds: its legend is long and rarely read. Folded until opened. */
 let petsOpen = false
 const PETS_KEY = 'pets'
@@ -283,6 +284,14 @@ function adopted(list: readonly Listed[], now: number): boolean {
 // Background shells and monitors live in the same map as agents; the prefix keeps their ids apart.
 // Both are tasks, so one task id ends either: a task-notification or a TaskStop.
 const shellId = (taskId: string) => `bg:${taskId}`
+
+// The task id TaskStop takes for a row: a shell's or monitor's behind its prefix, a background
+// subagent's is its agent id. Lane runs are processes outside the session, no task to stop.
+function stopTarget(node: FlowNode): string | undefined {
+  if (node.status !== 'running' || node.id === MAIN || node.id.startsWith('lane:')) return undefined
+  if (node.id.startsWith('bg:')) return node.id.slice(3)
+  return node.background ? node.id : undefined
+}
 
 // A monitor that times out may say nothing more: past its deadline it counts as done.
 function monitorsExpired(now: number): boolean {
@@ -862,6 +871,26 @@ export const register: Register = (on, options) => {
       if (isOpen) $.ui.invalidate('ui.render')
       return r
     }
+    if (key.startsWith(STOP_KEY)) {
+      const node = flow.nodes.get(key.slice(STOP_KEY.length))
+      const taskId = node ? stopTarget(node) : undefined
+      if (!node || !taskId) return r
+      // $.tool.call skips this plugin's own tool.call hook, so the row is marked here, not there.
+      const out = await $.tool.call({ tool: 'TaskStop', task_id: taskId }).catch((err: unknown) => ({ deny: String(err) }))
+      if (out.deny !== undefined) {
+        $.ui.toast(`stop ${node.description}: ${out.deny}`, { timeoutMs: 8000 })
+        return r
+      }
+      node.status = 'aborted'
+      node.durationMs = Date.now() - node.startedAt
+      await saveFlow($)
+      $.ui.toast(`■ stopped ${node.description}`)
+      if (isOpen) {
+        $.ui.status(statusText())
+        $.ui.invalidate('ui.render')
+      }
+      return r
+    }
     if (key.startsWith(MORE_KEY)) {
       const parent = key.slice(MORE_KEY.length)
       if (!opened.delete(parent)) opened.add(parent)
@@ -914,7 +943,8 @@ export const register: Register = (on, options) => {
       const ctx = node.contextTokens !== undefined ? fmtTokens(node.contextTokens) : ''
       const tools = node.toolCount ? `${node.toolCount}⚒` : ''
       const right = [ctx, tools].filter(Boolean).join(' ')
-      const room = width - prefix.length - 4 - (right ? right.length + 1 : 0)
+      const stoppable = stopTarget(node) !== undefined
+      const room = width - prefix.length - 4 - (right ? right.length + 1 : 0) - (stoppable ? 2 : 0)
       const name = node.id === MAIN ? 'main' : `${node.type}${node.fork ? ' (fork)' : ''}  ${node.description}`
       return (
         <Box key={`row:${node.id}`} flexDirection="row">
@@ -928,6 +958,8 @@ export const register: Register = (on, options) => {
             onPress={noop}
           />
           {right ? <Text color="magenta">{` ${right}`}</Text> : null}
+          {stoppable ? <Text>{' '}</Text> : null}
+          {stoppable ? <Button key={`${STOP_KEY}${node.id}`} plain label="✕" onPress={noop} /> : null}
         </Box>
       )
     }
